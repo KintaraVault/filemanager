@@ -14,14 +14,19 @@
 
 #include "base/url.h"
 #include "ui/application.h"
+#include "ui/clipboard.h"
+#include "ui/keys.h"
+#include "ui/label.h"
 #include "ui/menu.h"
 #include "ui/test_input.h"
 #include "ui/text_area.h"
+#include "ui/toolbar.h"
 #include "ui/window.h"
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 
 using namespace cutefish;
@@ -65,6 +70,98 @@ static void dragBy(ui::Window& window, ui::PointF from, ui::PointF delta)
     ui::TestInput::press(window, from);
     ui::TestInput::movePointer(window, to);
     ui::TestInput::release(window, to);
+}
+
+TEST(HeaderTest, SharePopoverShowsSelectionAndCopiesIt)
+{
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    const std::string folderName = "Bowling";
+    const std::string pdfName = "Racing-Car-Motor-Oil-Can-Label-Vintage-Red-02.pdf";
+    ASSERT_TRUE(std::filesystem::create_directory(directory.filePath(folderName)));
+    std::ofstream(directory.filePath(pdfName)) << "%PDF-1.4\n%%EOF\n";
+    const auto folderUrl = base::url::fromLocalFile(directory.filePath(folderName));
+    const auto pdfUrl = base::url::fromLocalFile(directory.filePath(pdfName));
+
+    WindowHost host;
+    fm::FolderWindow browser(&host, {directory.path(), {}, {}, {}}, {1050, 720});
+    browser.show();
+    auto& model = browser.currentPage()->model();
+    ASSERT_TRUE(runUntil(s_app->loop(), [&] { return model.status() == fm::FolderModel::Status::Ready; }));
+    browser.window().grab();
+    auto* toolbar = dynamic_cast<ui::Toolbar*>(findView(browser.window().contentView(), "toolbar"));
+    ASSERT_TRUE(toolbar);
+    auto* share = toolbar->itemView("share");
+    ASSERT_TRUE(share);
+    auto open = [&] { ui::TestInput::click(browser.window(), share->mapToWindow({10, 10})); };
+
+    open();
+    EXPECT_FALSE(browser.sharePopupWindow());
+    for (const auto& [name, url] : {std::pair{folderName, folderUrl}, std::pair{pdfName, pdfUrl}}) {
+        SCOPED_TRACE(name);
+        model.clearSelection();
+        const int index = model.rowForUrl(url);
+        ASSERT_GE(index, 0);
+        model.setSelected(index);
+        open();
+        auto* popup = browser.sharePopupWindow();
+        ASSERT_TRUE(popup);
+        popup->grab();
+        auto* panel = findView(popup->contentView(), "sharePanel");
+        ASSERT_TRUE(panel);
+        EXPECT_GT(panel->geometry().y, 0); // Space above the content for the arrow.
+        auto* title = dynamic_cast<ui::Label*>(findView(panel, "shareName"));
+        auto* icon = dynamic_cast<ui::ThemeIcon*>(findView(panel, "shareIcon"));
+        auto* detail = dynamic_cast<ui::Label*>(findView(panel, "shareDetails"));
+        ASSERT_TRUE(title && icon && detail);
+        EXPECT_EQ(title->text(), name);
+        EXPECT_FALSE(icon->iconName().empty());
+        EXPECT_FALSE(detail->text().empty());
+        if (name == pdfName) {
+            EXPECT_NE(detail->text().find("PDF"), std::string::npos);
+            EXPECT_EQ(title->lineCount(), 2u);
+        } else {
+            EXPECT_NE(icon->iconName().find("folder"), std::string::npos);
+        }
+
+        auto* copy = findView(panel, "shareCopy");
+        ASSERT_TRUE(copy);
+        // If the listing changes while open, the displayed file is still the one copied.
+        model.clearSelection();
+        ui::Clipboard::clear();
+        ui::TestInput::click(*popup, copy->mapToWindow({10, 10}));
+        EXPECT_FALSE(browser.sharePopupWindow());
+        bool read = false;
+        ui::Clipboard::requestData("text/uri-list", [&](std::optional<std::string> value) {
+            ASSERT_TRUE(value);
+            ui::MimeData data;
+            data.setData("text/uri-list", *value);
+            EXPECT_EQ(data.urls(), std::vector<std::string>{url});
+            read = true;
+        });
+        EXPECT_TRUE(read);
+    }
+
+    model.setSelected(model.rowForUrl(pdfUrl));
+    open();
+    auto* popup = browser.sharePopupWindow();
+    ASSERT_TRUE(popup);
+    popup->grab();
+    auto* location = findView(popup->contentView(), "shareCopyLocation");
+    ASSERT_TRUE(location);
+    ui::TestInput::click(*popup, location->mapToWindow({10, 10}));
+    EXPECT_FALSE(browser.sharePopupWindow());
+    std::string text;
+    ui::Clipboard::requestText([&](std::string value) { text = std::move(value); });
+    EXPECT_EQ(text, directory.filePath(pdfName));
+
+    open();
+    popup = browser.sharePopupWindow();
+    ASSERT_TRUE(popup);
+    ui::TestInput::setKeyboardFocus(*popup, true);
+    ui::TestInput::typeKey(*popup, ui::key::Escape);
+    EXPECT_FALSE(browser.sharePopupWindow());
+    ui::Clipboard::clear();
 }
 
 // A maximized window still moves from the path bar, as from the rest of the

@@ -1537,3 +1537,9 @@ msgstr "Показывать имена файлов"
 
 msgid "Use as Defaults"
 msgstr "Использовать по умолчанию"
+
+msgid "Share"
+msgstr "Поделиться"
+
+msgid "Copy Location"
+msgstr "Копировать путь"

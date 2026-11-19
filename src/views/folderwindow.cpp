@@ -12,6 +12,7 @@
 #include "dialogs/folderappearancedialog.h"
 #include "views/gridview.h"
 #include "views/pathbar.h"
+#include "views/sharepanel.h"
 #include "views/sidebar.h"
 #include "views/style.h"
 
@@ -21,7 +22,7 @@
 #include "ui/about_dialog.h"
 #include "ui/application.h"
 #include "ui/color_provider.h"
-#include "ui/clipboard.h"
+#include "ui/drop_down_popup.h"
 #include "ui/progress_bar.h"
 #include "ui/dialog_window.h"
 #include "ui/header_button.h"
@@ -737,6 +738,8 @@ void FolderWindow::close()
 {
     // The window goes on the next turn, not from inside its own handlers.
     m_closed = true;
+    if (m_sharePopup)
+        m_sharePopup->close();
     m_window->hide();
     base::EventLoop::current()->post([this, alive = m_alive] {
         if (*alive)
@@ -985,6 +988,8 @@ void FolderWindow::moveTab(int from, int to)
 
 void FolderWindow::syncNavigation()
 {
+    if (m_sharePopup)
+        m_sharePopup->close();
     FolderPage* page = currentPage();
     if (!page)
         return;
@@ -1133,6 +1138,8 @@ void FolderWindow::populateSidebarSettings(ui::Menu& menu)
 
 void FolderWindow::setToolbarEditing(bool editing)
 {
+    if (m_sharePopup)
+        m_sharePopup->close();
     auto& row = *m_root->row;
     if (editing == bool(m_root->palette))
         return;
@@ -1148,12 +1155,47 @@ void FolderWindow::setToolbarEditing(bool editing)
     m_root->requestLayout();
 }
 
+ui::Window* FolderWindow::sharePopupWindow() const
+{
+    return m_sharePopup ? m_sharePopup->window() : nullptr;
+}
+
+void FolderWindow::showSharePopup()
+{
+    if (m_sharePopup && m_sharePopup->isOpen()) {
+        m_sharePopup->close();
+        return;
+    }
+    auto* page = currentPage();
+    auto* anchor = m_root->row->toolbar->itemView("share");
+    if (!page || !anchor || !page->model().action("copy").enabled)
+        return;
+
+    auto& model = page->model();
+    FileItemList items;
+    const auto rows = model.selectedRows();
+    for (int row : rows) {
+        if (auto item = model.item(row))
+            items.push_back(std::move(item));
+    }
+    if (items.empty())
+        return;
+    if (m_menu)
+        m_menu->close();
+    if (!m_sharePopup)
+        m_sharePopup = std::make_unique<ui::DropDownPopup>();
+    m_sharePopup->setContentView(makeSharePanel(std::move(items), model.displayName(rows.front()),
+        [this] { m_sharePopup->close(); }));
+    m_sharePopup->popoverFor(anchor);
+}
+
 void FolderWindow::toolbarAction(const std::string& id, ui::PointF position)
 {
     auto* page = currentPage();
     if (!page)
         return;
     auto& model = page->model();
+    if (id == "share") { showSharePopup(); return; }
     if (id == "search") { m_pathBar->openSearch(); return; }
     if (id == "info") { model.openPropertiesDialog(); return; }
     if (id == "quicklook") { page->quickLook(); return; }
@@ -1207,29 +1249,6 @@ void FolderWindow::toolbarAction(const std::string& id, ui::PointF position)
                 m_menu->setItemChecked(row, checked);
             }
         }
-    } else if (id == "share") {
-        const auto rows = model.selectedRows();
-        const std::string title = rows.size() > 1 ? cutefish::i18n::trn("{n} item", "{n} items", rows.size())
-                : rows.empty() ? page->folderName() : model.displayName(rows.front());
-        m_menu->setItemEnabled(m_menu->addItem(title, [] {}), false);
-        m_menu->addSeparator();
-        auto urls = model.selectedUrls();
-        if (urls.empty())
-            urls.push_back(model.resolvedUrl());
-        m_menu->addItem(tr("Copy Location"), [urls] {
-            std::string text;
-            for (const auto& url : urls) {
-                if (!text.empty())
-                    text += '\n';
-                const auto path = base::url::toLocalFile(url);
-                text += path.value_or(url);
-            }
-            ui::Clipboard::setText(text);
-        });
-        const auto copy = m_menu->addItem(tr("Copy Files"), [this] { if (auto* p = currentPage()) p->model().copy(); });
-        m_menu->setItemEnabled(copy, !rows.empty());
-        m_menu->addSeparator();
-        m_menu->setItemEnabled(m_menu->addItem(tr("No sharing services available"), [] {}), false);
     } else {
         return;
     }

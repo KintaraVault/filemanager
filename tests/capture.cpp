@@ -13,7 +13,9 @@
 #include "base/timer.h"
 #include "base/url.h"
 #include "ui/application.h"
+#include "ui/test_input.h"
 #include "ui/theme.h"
+#include "ui/toolbar.h"
 #include "ui/window.h"
 
 #include "core/preferences.h"
@@ -43,6 +45,17 @@ public:
 };
 
 } // namespace
+
+static ui::Toolbar* findToolbar(ui::View* root)
+{
+    if (auto* toolbar = dynamic_cast<ui::Toolbar*>(root))
+        return toolbar;
+    for (const auto& child : root->children()) {
+        if (auto* toolbar = findToolbar(child.get()))
+            return toolbar;
+    }
+    return nullptr;
+}
 
 // The desktop's icons of ~/Desktop alone, transparent, under a 32 px bar.
 static int captureDesktop(ui::Application& app, const std::string& output, double width, double height,
@@ -93,7 +106,7 @@ static int captureDesktop(ui::Application& app, const std::string& output, doubl
 int main(int argc, char** argv)
 {
     if (argc < 3) {
-        std::fprintf(stderr, "usage: %s OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list|columns|gallery] [late-work-area] [select=NAME]]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list|columns|gallery] [share] [late-work-area] [select=NAME]]\n", argv[0]);
         return 1;
     }
     const std::string output = argv[1];
@@ -107,6 +120,7 @@ int main(int argc, char** argv)
     bool inspector = false;
     bool palette = false;
     bool options = false;
+    bool share = false;
     std::string appearance;
     std::string branch;
     std::vector<std::string> select;
@@ -128,6 +142,8 @@ int main(int argc, char** argv)
             palette = true;
         else if (argument == "options")
             options = true;
+        else if (argument == "share")
+            share = true;
         else if (argument.starts_with("appearance="))
             appearance = argument.substr(11);
         else if (argument.starts_with("branch="))
@@ -190,12 +206,31 @@ int main(int argc, char** argv)
     // A headless window lays out only when grabbed; what it asks for then
     // (thumbnails, folder sizes) arrives from workers.
     window.window().grab();
+    if (share) {
+        auto* toolbar = findToolbar(window.window().contentView());
+        auto* button = toolbar ? toolbar->itemView("share") : nullptr;
+        if (!button)
+            return 1;
+        ui::TestInput::click(window.window(), button->mapToWindow({button->localRect().width / 2, button->localRect().height / 2}));
+        auto* popup = window.sharePopupWindow();
+        if (!popup)
+            return 1;
+        popup->setScale(scale);
+    }
     base::Timer settle;
     settle.setSingleShot(true);
     settle.onTimeout = [&] { app.quit(); };
     settle.start(1500ms);
     app.run();
 
+    if (share) {
+        auto* popup = window.sharePopupWindow();
+        if (!popup)
+            return 1;
+        const auto image = popup->grab();
+        std::ofstream(output + ".txt") << popup->layoutDump();
+        return image.savePng(output) ? 0 : 1;
+    }
     window.window().grab().savePng(output);
     std::ofstream(output + ".txt") << window.window().layoutDump();
     return 0;
