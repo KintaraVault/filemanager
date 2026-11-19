@@ -1291,3 +1291,51 @@ msgstr "Файловый менеджер"
 #: data/cutefish-filemanager.desktop
 msgid "Browse and manage your files"
 msgstr "Просмотр и управление файлами"
+
+#: src/views/sidebar.cpp src/views/folderwindow.cpp
+msgid "Tags"
+msgstr "Теги"
+
+#: src/views/sidebar.cpp
+msgid "All Tags…"
+msgstr "Все теги…"
+
+#: src/core/filetags.h
+msgid "Red"
+msgstr "Красный"
+
+#: src/core/filetags.h
+msgid "Orange"
+msgstr "Оранжевый"
+
+#: src/core/filetags.h
+msgid "Yellow"
+msgstr "Жёлтый"
+
+#: src/core/filetags.h
+msgid "Green"
+msgstr "Зелёный"
+
+#: src/core/filetags.h
+msgid "Blue"
+msgstr "Синий"
+
+#: src/core/filetags.h
+msgid "Purple"
+msgstr "Фиолетовый"
+
+#: src/core/filetags.h
+msgid "Gray"
+msgstr "Серый"
+
+#: src/model/foldercontents.cpp
+msgid "Untagged"
+msgstr "Без тегов"
+
+#: src/views/folderwindow.cpp
+msgid "Select local files or folders to tag"
+msgstr "Выберите локальные файлы или папки, чтобы добавить теги"
+
+#: src/views/folderwindow.cpp
+msgid "Some tags could not be changed. Check the file permissions and filesystem support."
+msgstr "Не удалось изменить некоторые теги. Проверьте права доступа и поддержку тегов файловой системой."

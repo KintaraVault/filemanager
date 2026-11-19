@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "model/foldermodel.h"
+#include "core/filetags.h"
 #include "core/config.h"
 #include "core/dates.h"
 #include "core/launcher.h"
@@ -527,7 +528,7 @@ void FolderModel::setGroupBy(int group)
 
 void FolderModel::setTagFilter(int tag)
 {
-    m_tagFilter = std::clamp(tag, -1, 6);
+    m_tagFilter = std::clamp(tag, -1, filetags::all);
     if (m_tagFilter >= 0)
         m_contents.collapseAll();
     m_contents.setQuery({m_sortMode, m_sortDesc, m_sortDirsFirst, m_groupBy, m_tagFilter});
@@ -1609,6 +1610,31 @@ bool FolderModel::canDropUrls(const std::vector<std::string>& urls, int row, uin
             return false;
     }
     return true;
+}
+
+uint32_t FolderModel::dropActions(const std::vector<std::string>& urls, int row, uint32_t sourceActions) const
+{
+    uint32_t accepted = ui::NoAction;
+    for (const uint32_t action : {ui::CopyAction, ui::MoveAction}) {
+        if ((sourceActions & action) && canDropUrls(urls, row, action))
+            accepted |= action;
+    }
+    if (accepted == ui::NoAction)
+        return ui::NoAction;
+
+    const std::string targetUrl = dropTargetUrl(row);
+    bool sameVolume = true;
+    if (targetUrl.starts_with("trash:")) {
+        if (accepted & ui::MoveAction)
+            accepted = ui::MoveAction;
+    } else {
+        std::vector<std::string> paths;
+        for (const std::string& url : urls)
+            paths.push_back(localPathOf(url));
+        sameVolume = isOnSameVolume(paths, localPathOf(targetUrl));
+    }
+    const bool move = (accepted & ui::MoveAction) && (sameVolume || !(accepted & ui::CopyAction));
+    return ui::dropActions(accepted, move ? ui::MoveAction : ui::CopyAction);
 }
 
 void FolderModel::drop(const std::vector<std::string>& urls, int row, uint32_t action, int x, int y)

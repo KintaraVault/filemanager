@@ -50,6 +50,7 @@ public:
     void retranslate();
     // Lights the place showing the folder.
     void updateSelection(const std::string& path);
+    void setSelectedTag(int tag);
     // The Connect to Server dialog, over the window.
     void connectToServer();
 

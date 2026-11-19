@@ -336,9 +336,10 @@ void FolderContents::prepare()
                     }
                     FileItemList incoming;
                     incoming.reserve(result->listed.size());
+                    const unsigned tagMask = query.tag < 0 ? 0 : query.tag == filetags::all ? 0x7f : 1u << query.tag;
                     for (const FileItemPtr& item : result->listed) {
                         checkpoint();
-                        if ((!filter || filter(*item)) && (query.tag < 0 || (item->isLocalFile() && (filetags::read(item->path) & (1u << query.tag)))))
+                        if ((!filter || filter(*item)) && (!tagMask || (item->isLocalFile() && (filetags::read(item->path) & tagMask))))
                             incoming.push_back(item);
                     }
 

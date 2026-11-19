@@ -61,6 +61,60 @@ static int deviceRow(const PlacesModel& places, const std::string& udi)
     return -1;
 }
 
+class SidebarTagRow : public ui::Button
+{
+public:
+    explicit SidebarTagRow(int tag) : m_tag(tag), m_label(addChild<ui::Label>())
+    {
+        m_label->setElide(ui::Label::Elide::Right);
+        m_label->setVerticallyCentered(true);
+        retranslate();
+    }
+
+    void retranslate()
+    {
+        const char* name = m_tag == filetags::all ? tr("All Tags…") : tr(filetags::names[size_t(m_tag)]);
+        setName(name);
+        m_label->setText(name);
+    }
+
+    void setSelected(bool selected)
+    {
+        m_selected = selected;
+        requestPaint();
+    }
+
+protected:
+    void layout() override
+    {
+        m_label->setGeometry({32, 0, std::max(0.0, geometry().width - 38), geometry().height});
+    }
+
+    void paint(ui::Painter& painter) override
+    {
+        const auto& theme = ui::Theme::current();
+        if (m_selected || m_hovered || hasFocus())
+            painter.drawSmoothRectangle(localRect(), theme.mediumRadius, style::textAlpha(m_selected ? 0.10 : 0.05));
+        const double y = (geometry().height - 10) / 2;
+        if (m_tag == filetags::all) {
+            const ui::Color clear {0, 0, 0, 0};
+            painter.drawSmoothRectangle({7, y, 10, 10}, 5, clear, 1, theme.disabledText);
+            painter.drawSmoothRectangle({11, y, 10, 10}, 5, clear, 1, theme.disabledText);
+        } else {
+            painter.drawSmoothRectangle({9, y, 10, 10}, 5, ui::Color::rgb(filetags::colors[size_t(m_tag)]));
+        }
+    }
+
+    void pointerEnter() override { m_hovered = true; requestPaint(); }
+    void pointerLeave() override { m_hovered = false; requestPaint(); }
+
+private:
+    int m_tag;
+    ui::Label* m_label;
+    bool m_selected = false;
+    bool m_hovered = false;
+};
+
 // The places: every length on the
 // device grid, so no row lands on half a pixel at a fractional scale.
 class SidebarList : public ui::View
@@ -72,9 +126,9 @@ public:
         setName("places");
         m_favorites = addChild<ui::Label>(tr("Favorites"));
         m_tags = addChild<ui::Label>(tr("Tags"));
-        for (size_t i = 0; i < filetags::names.size(); ++i) {
-            auto* tag = addChild<ui::Button>(tr(filetags::names[i]));
-            tag->onClicked = [this, i] { if (m_sidebar->onTagClicked) m_sidebar->onTagClicked(int(i)); };
+        for (int i = 0; i <= filetags::all; ++i) {
+            auto* tag = addChild<SidebarTagRow>(i);
+            tag->onClicked = [this, i] { if (m_sidebar->onTagClicked) m_sidebar->onTagClicked(i); };
             m_tagButtons.push_back(tag);
         }
     }
@@ -104,7 +158,7 @@ public:
         if (any)
             y -= spacing;
         if (Preferences::instance().option(Preferences::SidebarTags))
-            y += snap(36) + m_tagButtons.size() * (rowHeight + spacing);
+            y += snap(32) + m_tagButtons.size() * tagRowHeight();
         return y + snap(kSmallSpacing);
     }
 
@@ -134,8 +188,8 @@ public:
     {
         m_favorites->setText(tr("Favorites"));
         m_tags->setText(tr("Tags"));
-        for (size_t i = 0; i < m_tagButtons.size(); ++i)
-            m_tagButtons[i]->setText(tr(filetags::names[i]));
+        for (auto* tag : m_tagButtons)
+            tag->retranslate();
         requestLayout();
     }
 
@@ -144,6 +198,12 @@ public:
         m_selected = row;
         requestLayout();
         requestPaint();
+    }
+
+    void setSelectedTag(int tag)
+    {
+        for (size_t i = 0; i < m_tagButtons.size(); ++i)
+            m_tagButtons[i]->setSelected(tag == int(i));
     }
 
 protected:
@@ -166,6 +226,7 @@ protected:
     }
 
     double sideInset() const { return snap(kSmallSpacing * 1.5); }
+    double tagRowHeight() const { return snap(std::max(28.0, style::fontHeight() + 9)); }
 
     void removeRow(const Row& row)
     {
@@ -268,12 +329,12 @@ protected:
         const double left = inset + kSmallSpacing;
         styleSection(m_tags);
         m_tags->setVisible(tags);
-        m_tags->setGeometry({left, y, std::max(0.0, width - left * 2), snap(36)});
-        y += snap(36);
+        m_tags->setGeometry({left, y, std::max(0.0, width - left * 2), snap(32)});
+        y += snap(32);
         for (auto* tag : m_tagButtons) {
             tag->setVisible(tags);
-            tag->setGeometry({left, y, std::max(0.0, width - left * 2), rowHeight});
-            y += rowHeight + spacing;
+            tag->setGeometry({inset, y, std::max(0.0, width - inset * 2), tagRowHeight()});
+            y += tagRowHeight();
         }
     }
 
@@ -466,6 +527,7 @@ protected:
     void dragEnter(const ui::DragEvent& event) override
     {
         m_dropUrls.clear();
+        m_dropSourceActions = event.offer->sourceActions();
         event.offer->read("text/uri-list", [this, alive = m_alive](std::string data) {
             if (!*alive)
                 return;
@@ -477,10 +539,11 @@ protected:
 
     uint32_t dragUpdate(const ui::DragEvent& event) override
     {
-        m_dropAction = (event.modifiers & ui::ControlModifier) ? ui::CopyAction : ui::MoveAction;
         positionDrop(event.position.y, false, m_dropUrls);
         requestPaint();
-        return m_dropTargetRow >= 0 || m_dropIndex >= 0 ? m_dropAction : ui::NoAction;
+        if (m_dropTargetRow >= 0)
+            return m_dropAnswer;
+        return m_dropIndex >= 0 ? ui::MoveAction : ui::NoAction;
     }
 
     void dragLeave() override
@@ -492,7 +555,7 @@ protected:
     uint32_t drop(const ui::DragEvent& event) override
     {
         PlacesModel& places = m_sidebar->places();
-        const uint32_t action = (event.modifiers & ui::ControlModifier) ? ui::CopyAction : ui::MoveAction;
+        const uint32_t action = ui::takenDropAction(m_dropAnswer, event.offer->action());
         bool accepted = false;
         if (m_dropTargetRow >= 0)
             accepted = places.dropInto(m_dropUrls, m_dropTargetRow, action);
@@ -530,7 +593,8 @@ private:
                 const double edge = canPin && row < count ? rect.height / 4 : 0;
                 if (y >= rect.y + edge && y <= rect.y + rect.height - edge) {
                     m_dropIndex = -1;
-                    if (places.canDropInto(urls, row, m_dropAction))
+                    m_dropAnswer = places.dropActions(urls, row, m_dropSourceActions);
+                    if (m_dropAnswer != ui::NoAction)
                         m_dropTargetRow = row;
                     else
                         m_dropRejectedRow = row;
@@ -562,7 +626,7 @@ private:
     SideBar* m_sidebar;
     ui::Label* m_favorites;
     ui::Label* m_tags;
-    std::vector<ui::Button*> m_tagButtons;
+    std::vector<SidebarTagRow*> m_tagButtons;
     std::vector<Row> m_rows;
     int m_selected = -1;
     int m_pressedRow = -1;
@@ -575,7 +639,8 @@ private:
     int m_dropTargetRow = -1;
     int m_dropRejectedRow = -1;
     double m_dropY = 0;
-    uint32_t m_dropAction = ui::MoveAction;
+    uint32_t m_dropSourceActions = ui::NoAction;
+    uint32_t m_dropAnswer = ui::NoAction;
     std::vector<std::string> m_dropUrls;
     std::unique_ptr<ui::Menu> m_menu;
     std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
@@ -786,6 +851,11 @@ void SideBar::updateSelection(const std::string& path)
         }
     }
     m_list->setSelected(row);
+}
+
+void SideBar::setSelectedTag(int tag)
+{
+    m_list->setSelectedTag(tag);
 }
 
 void SideBar::layout()

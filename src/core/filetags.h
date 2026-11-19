@@ -15,6 +15,9 @@ namespace fm::filetags {
 inline constexpr std::array names{cutefish::i18n::trNoop("Red"), cutefish::i18n::trNoop("Orange"),
     cutefish::i18n::trNoop("Yellow"), cutefish::i18n::trNoop("Green"), cutefish::i18n::trNoop("Blue"),
     cutefish::i18n::trNoop("Purple"), cutefish::i18n::trNoop("Gray")};
+inline constexpr std::array<uint32_t, names.size()> colors{0xff2d24, 0xe98100, 0xe9ae00,
+    0x11b42d, 0x0074ef, 0x9942bf, 0x706d70};
+inline constexpr int all = int(names.size());
 inline constexpr const char* key = "user.cutefish.tags";
 
 inline uint8_t read(const std::string& path)

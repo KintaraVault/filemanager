@@ -3,6 +3,7 @@
 
 #include "testutil.h"
 
+#include "core/preferences.h"
 #include "model/foldermodel.h"
 #include "views/folderpage.h"
 #include "views/folderview.h"
@@ -162,6 +163,60 @@ TEST(HeaderTest, WindowShowsItsMenusInTheMenuBar)
     file->onAboutToShow();
     folderWindow.reset();
     fmtest::runFor(loop, 50);
+}
+
+TEST(HeaderTest, FourViewsKeepTheOpenFolderAndSelection)
+{
+    struct RestoreView {
+        int saved = fm::Preferences::instance().viewMethod();
+        ~RestoreView() { fm::Preferences::instance().setViewMethod(saved); }
+    } restore;
+    base::EventLoop& loop = s_app->loop();
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    std::filesystem::create_directories(directory.filePath("branch"));
+    ASSERT_TRUE(fmtest::writeFile(directory.filePath("branch/notes.txt")));
+    const auto selected = base::url::fromLocalFile(directory.filePath("branch/notes.txt"));
+    WindowHost host;
+    fm::FolderPage::Start start;
+    start.url = directory.path();
+    fm::FolderWindow folderWindow(&host, start);
+    folderWindow.show();
+    auto* page = folderWindow.currentPage();
+    auto& model = page->model();
+    page->openUrl(directory.filePath("branch"));
+    ASSERT_TRUE(runUntil(loop, [&] { return model.rowForUrl(selected) >= 0; }));
+    model.setSelected(model.rowForUrl(selected));
+
+    for (const auto mode : {fm::Preferences::List, fm::Preferences::Columns, fm::Preferences::Gallery, fm::Preferences::Grid}) {
+        fm::Preferences::instance().setViewMethod(mode);
+        folderWindow.window().grab();
+        EXPECT_TRUE(page->view());
+        EXPECT_EQ(page->currentUrl(), directory.filePath("branch"));
+        EXPECT_EQ(model.selectedUrls(), std::vector<std::string>{selected});
+        EXPECT_TRUE(model.canGoBack());
+    }
+}
+
+TEST(HeaderTest, ListExpansionDoesNotNavigate)
+{
+    base::EventLoop& loop = s_app->loop();
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    std::filesystem::create_directories(directory.filePath("branch"));
+    ASSERT_TRUE(fmtest::writeFile(directory.filePath("branch/notes.txt")));
+    const auto branch = base::url::fromLocalFile(directory.filePath("branch"));
+    const auto notes = base::url::fromLocalFile(directory.filePath("branch/notes.txt"));
+    fm::FolderModel model;
+    model.setUrl(directory.path());
+    ASSERT_TRUE(runUntil(loop, [&] { return model.rowForUrl(branch) >= 0; }));
+    model.contents().toggleExpansion(branch, false);
+    ASSERT_TRUE(runUntil(loop, [&] { return model.rowForUrl(notes) >= 0; }));
+    EXPECT_EQ(model.contents().depth(model.rowForUrl(notes)), 1);
+    EXPECT_FALSE(model.canGoBack());
+    model.contents().toggleExpansion(branch, false);
+    EXPECT_LT(model.rowForUrl(notes), 0);
+    EXPECT_GE(model.rowForUrl(branch), 0);
 }
 
 // A new session language takes the text again where the user was: the tabs,

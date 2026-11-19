@@ -23,6 +23,7 @@
 #include "ui/progress_bar.h"
 #include "ui/dialog_window.h"
 #include "ui/header_button.h"
+#include "ui/header_button_group.h"
 #include "ui/keys.h"
 #include "ui/label.h"
 #include "ui/menu.h"
@@ -626,6 +627,7 @@ FolderWindow::FolderWindow(FileManagerHost* host, const FolderPage::Start& start
         if (FolderPage* page = currentPage()) {
             if (page->model().tagFilter() >= 0)
                 page->model().setTagFilter(-1);
+            m_sidebar->setSelectedTag(-1);
             page->openUrl(path);
         }
     };
@@ -633,8 +635,7 @@ FolderWindow::FolderWindow(FileManagerHost* host, const FolderPage::Start& start
         if (auto* page = currentPage()) {
             auto& model = page->model();
             model.setTagFilter(model.tagFilter() == tag ? -1 : tag);
-            notify(model.tagFilter() < 0 ? tr("Showing all items")
-                    : format(tr("Showing {tag} tags in this folder"), {{"tag", tr(filetags::names[size_t(tag)])}}));
+            m_sidebar->setSelectedTag(model.tagFilter());
         }
     };
     m_sidebar->onOpenInNewTab = [this](const std::string& path) { openTab(path); };
@@ -976,6 +977,7 @@ void FolderWindow::syncNavigation()
     m_archivePassword->setModel(&page->model(), m_window.get());
     m_pathBar->closeEditor();
     m_sidebar->updateSelection(page->currentUrl());
+    m_sidebar->setSelectedTag(page->model().tagFilter());
     m_pathBar->updateUrl(page->currentUrl());
     updateTabBar();
     updateHeader();

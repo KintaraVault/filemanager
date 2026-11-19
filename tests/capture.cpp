@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 // Renders a browser window headless with its layout:
-//   filemanager-capture OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list] [select=NAME...]]
+//   filemanager-capture OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list|columns|gallery] [select=NAME...]]
 #include "model/foldermodel.h"
 #include "desktop/desktopview.h"
 #include "views/folderwindow.h"
@@ -92,7 +92,7 @@ static int captureDesktop(ui::Application& app, const std::string& output, doubl
 int main(int argc, char** argv)
 {
     if (argc < 3) {
-        std::fprintf(stderr, "usage: %s OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list] [late-work-area] [select=NAME]]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list|columns|gallery] [late-work-area] [select=NAME]]\n", argv[0]);
         return 1;
     }
     const std::string output = argv[1];
@@ -101,7 +101,7 @@ int main(int argc, char** argv)
     const double height = argc > 4 ? std::atof(argv[4]) : 580;
     const double scale = argc > 5 ? std::atof(argv[5]) : 1.5;
     bool dark = false;
-    bool list = false;
+    int mode = fm::Preferences::Grid;
     bool lateWorkArea = false;
     std::vector<std::string> select;
     for (int i = 6; i < argc; ++i) {
@@ -109,7 +109,11 @@ int main(int argc, char** argv)
         if (argument == "dark")
             dark = true;
         else if (argument == "list")
-            list = true;
+            mode = fm::Preferences::List;
+        else if (argument == "columns")
+            mode = fm::Preferences::Columns;
+        else if (argument == "gallery")
+            mode = fm::Preferences::Gallery;
         else if (argument == "late-work-area")
             lateWorkArea = true;
         else if (argument.starts_with("select="))
@@ -121,7 +125,7 @@ int main(int argc, char** argv)
     if (folder == "desktop")
         return captureDesktop(app, output, width, height, scale, select, lateWorkArea);
     fm::Preferences::instance().setReadOnly(true);
-    fm::Preferences::instance().setViewMethod(list ? fm::Preferences::List : fm::Preferences::Grid);
+    fm::Preferences::instance().setViewMethod(mode);
 
     Host host;
     fm::FolderWindow window(&host, {folder, {}, {}, {}});
