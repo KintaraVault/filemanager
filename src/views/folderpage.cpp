@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "views/folderpage.h"
+#include "views/browserviews.h"
 #include "views/previewclient.h"
 #include "core/preferences.h"
 #include "model/foldermodel.h"
@@ -22,6 +23,7 @@
 #include "ui/theme.h"
 
 #include <algorithm>
+#include <sys/statvfs.h>
 
 using cutefish::i18n::format;
 using cutefish::i18n::tr;
@@ -41,6 +43,15 @@ FolderPage::FolderPage(FolderModelHost* host, const Start& start)
     m_noResults = addChild<ui::Label>(tr("No Results"));
     m_noResults->setFontSize(15 * 4.0 / 3);
     m_noResults->setVisible(false);
+    m_inspector = addChild<FilePreviewPane>(true);
+    m_inspector->onQuickLook = [this] { quickLook(); };
+    m_inspector->onOpen = [this] { m_model->openSelected(); };
+    m_inspector->onProperties = [this] { m_model->openPropertiesDialog(); };
+    m_status = addChild<ui::Label>();
+    m_status->setColor(ui::ColorId::DisabledText);
+    m_status->setTextAlignment(ui::Label::TextAlignment::Center);
+    m_status->setVerticallyCentered(true);
+    m_status->setFontSize(11);
 
     FolderModel& model = *m_model;
     const auto applySort = [this] {
@@ -48,19 +59,25 @@ FolderPage::FolderPage(FolderModelHost* host, const Start& start)
         const bool trash = m_model->isTrash();
         m_model->setSortMode(trash ? preferences.trashSortMode() : preferences.sortMode());
         m_model->setSortDesc(trash ? preferences.trashSortDesc() : preferences.sortDesc());
+        m_model->setSortDirsFirst(preferences.option(Preferences::FoldersFirst));
+        m_model->setGroupBy(trash ? Preferences::NoGroup : preferences.groupBy());
     };
     m_subscriptions.push_back(Preferences::instance().changed.connect([this, applySort] {
         applySort();
         if (Preferences::instance().viewMethod() != m_viewMethod)
             createView();
+        updateDetails();
     }));
     m_subscriptions.push_back(model.urlChanged.connect([this, applySort] {
         applySort();
         if (m_view) {
             m_view->reset();
+            if (m_columns)
+                m_columns->updatePath();
             m_pendingViewPosition = m_model->viewPosition();
             focusView();
         }
+        updateDetails();
         currentUrlChanged.emit();
     }));
     m_subscriptions.push_back(model.aboutToLeaveFolder.connect([this] {
@@ -75,8 +92,10 @@ FolderPage::FolderPage(FolderModelHost* host, const Start& start)
     }));
     m_subscriptions.push_back(model.countChanged.connect([this] {
         restoreViewPosition(false);
+        updateDetails();
         requestLayout();
     }));
+    m_subscriptions.push_back(model.selectionChanged.connect([this] { updateDetails(); }));
     // An item asked for, such as one shown in its folder, wins over the saved offset.
     m_subscriptions.push_back(model.scrollToItem.connect([this](int) {
         m_pendingViewPosition = NAN;
@@ -107,6 +126,8 @@ void FolderPage::activatePreview()
     m_preview->activate();
 }
 
+void FolderPage::quickLook() { m_preview->toggle(); }
+
 std::string FolderPage::currentUrl() const
 {
     return m_model->url();
@@ -135,8 +156,12 @@ public:
     {
         m_crumbs = addChild<Breadcrumbs>(false);
         m_crumbs->onItemClicked = [this](const std::string& path) {
-            if (path == m_path)
-                m_page->model().showInFolder();
+            if (path == m_path) {
+                if (!m_page->model().searchText().empty())
+                    m_page->model().showInFolder();
+                else
+                    m_page->model().openSelected();
+            }
             else
                 m_page->openUrl(path);
         };
@@ -156,8 +181,7 @@ public:
     void update()
     {
         m_path = m_page->model().selectedPath();
-        m_crumbs->setCrumbs(m_path.empty() ? std::vector<Crumb>() : pathCrumbs(base::url::fromLocalFile(m_path)));
-        m_crumbs->setVisible(!m_path.empty());
+        m_crumbs->setCrumbs(pathCrumbs(m_path.empty() ? m_page->currentUrl() : base::url::fromLocalFile(m_path)));
         requestLayout();
     }
 
@@ -190,22 +214,42 @@ void FolderPage::retranslate()
     if (m_view)
         m_view->retranslate();
     m_pathStrip->update();
+    updateDetails();
     requestLayout();
 }
 
 void FolderPage::createView()
 {
+    if (m_viewMethod == Preferences::List)
+        m_model->contents().collapseAll();
     m_viewMethod = Preferences::instance().viewMethod();
-    if (m_view) {
-        std::shared_ptr<View> old = takeChild(m_view);
+    if (m_viewRoot) {
+        std::shared_ptr<View> old = takeChild(m_viewRoot);
         base::EventLoop::current()->post([old] {});
     }
+    if (m_gallery) {
+        std::shared_ptr<View> old = takeChild(m_gallery);
+        base::EventLoop::current()->post([old] {});
+    }
+    m_columns = nullptr;
+    m_gallery = nullptr;
+    m_backdrop = nullptr;
 
     FolderView* view;
     if (m_viewMethod == Preferences::List)
-        view = addChild<FolderListView>(*m_model);
+        view = addChild<FolderListView>(*m_model, false, true);
+    else if (m_viewMethod == Preferences::Columns) {
+        m_columns = addChild<ColumnBrowser>(*m_model);
+        view = m_columns->activeView();
+        m_columns->preview()->onQuickLook = [this] { quickLook(); };
+        m_columns->preview()->onProperties = [this] { m_model->openPropertiesDialog(); };
+    } else if (m_viewMethod == Preferences::Gallery) {
+        m_gallery = addChild<FilePreviewPane>(false);
+        view = addChild<Filmstrip>(*m_model);
+    }
     else
         view = addChild<FolderGridView>(*m_model);
+    m_viewRoot = m_columns ? static_cast<ui::View*>(m_columns) : view;
     view->setBottomCornerRadius(ui::Theme::current().windowRadius);
     m_view = view;
     m_preview->attach(m_model.get(), view);
@@ -216,18 +260,53 @@ void FolderPage::createView()
     view->onKeyPressed = [this](const ui::KeyEvent& event) { return handleKey(event); };
 
     // Inside the view, so the list's column header stays above the blur.
-    m_backdrop = view->addChild<ui::HeaderBackdrop>(view);
-    m_backdrop->setBaseColor(ui::Theme::current().secondBackground);
-    m_backdrop->setSeparatorVisible(m_viewMethod != Preferences::List);
+    if (!m_columns && !m_gallery) {
+        m_backdrop = view->addChild<ui::HeaderBackdrop>(view);
+        m_backdrop->setBaseColor(ui::Theme::current().secondBackground);
+        m_backdrop->setSeparatorVisible(m_viewMethod != Preferences::List);
+    }
     if (!m_pathStrip) {
         m_pathStrip = addChild<SearchPathStrip>(this);
-        m_subscriptions.push_back(m_model->selectionChanged.connect([this] { m_pathStrip->update(); }));
     }
-    m_pathStrip->setBackdrop(view);
     raiseChild(m_pathStrip);
+    raiseChild(m_status);
+    raiseChild(m_inspector);
     raiseChild(m_noResults);
+    updateDetails();
     requestLayout();
     focusView();
+}
+
+void FolderPage::updateDetails()
+{
+    if (!m_pathStrip)
+        return;
+    const auto& prefs = Preferences::instance();
+    const auto& model = *m_model;
+    m_pathStrip->update();
+    const auto rows = model.selectedRows();
+    const int row = rows.empty() ? -1 : model.isSelected(model.currentIndex()) ? model.currentIndex() : rows.front();
+    const auto item = model.item(row);
+    m_inspector->setVisible(!m_columns && prefs.option(Preferences::PreviewPane));
+    if (m_inspector->isVisible())
+        m_inspector->setItem(rows.size() == 1 ? item : nullptr, row >= 0 ? model.displayName(row) : std::string());
+    if (m_gallery) {
+        const int hero = row >= 0 ? row : model.count() ? 0 : -1;
+        m_gallery->setItem(model.item(hero), hero >= 0 ? model.displayName(hero) : std::string());
+    }
+    m_status->setVisible(prefs.option(Preferences::StatusBar));
+    if (m_status->isVisible()) {
+        std::string text = rows.empty()
+                ? cutefish::i18n::trn("{n} item", "{n} items", model.count())
+                : format(tr("{selected} of {total} selected"), {{"selected", std::to_string(rows.size())}, {"total", std::to_string(model.count())}});
+        if (!model.rootItem().path.empty()) {
+            struct statvfs space {};
+            if (!model.isTrash() && ::statvfs(model.rootItem().path.c_str(), &space) == 0)
+                text += " · " + format(tr("{size} available"), {{"size", formatSize(uint64_t(space.f_bavail) * space.f_frsize)}});
+        }
+        m_status->setText(std::move(text));
+    }
+    requestLayout();
 }
 
 void FolderPage::setHeaderHeight(double height)
@@ -242,18 +321,29 @@ void FolderPage::layout()
 {
     const ui::RectF rect = localRect();
     if (m_view) {
-        m_view->setGeometry(rect);
-        if (m_viewMethod == Preferences::List)
-            m_view->setTopInset(m_headerHeight + kSmallSpacing);
-        else
-            m_view->setTopInset(m_headerHeight);
-        m_backdrop->setBaseColor(ui::Theme::current().secondBackground);
-        m_backdrop->setVisible(m_view->topInset() > 0);
-        m_backdrop->setGeometry({0, 0, rect.width, m_view->headerHeight()});
-        const bool searching = !m_model->searchText().empty();
-        m_pathStrip->setVisible(searching);
-        m_pathStrip->setGeometry({0, rect.height - 28, rect.width, 28});
-        m_view->setBottomInset(searching ? 28 : 0);
+        const bool path = Preferences::instance().option(Preferences::PathBar) || !m_model->searchText().empty();
+        const double statusHeight = m_status->isVisible() ? 23 : 0;
+        const double pathHeight = path ? 25 : 0;
+        const double bottom = rect.height - statusHeight - pathHeight;
+        const double inspectorWidth = m_inspector->isVisible() ? std::min(250.0, rect.width * 0.45) : 0;
+        const double width = rect.width - inspectorWidth;
+        m_inspector->setGeometry({width, m_headerHeight, inspectorWidth, std::max(0.0, bottom - m_headerHeight)});
+        if (m_columns) {
+            m_columns->setGeometry({0, m_headerHeight, width, std::max(0.0, bottom - m_headerHeight)});
+        } else if (m_gallery) {
+            const double filmHeight = 93;
+            m_view->setGeometry({0, bottom - filmHeight, width, filmHeight});
+            m_gallery->setGeometry({0, m_headerHeight, width, std::max(0.0, bottom - filmHeight - m_headerHeight)});
+        } else {
+            m_view->setGeometry({0, 0, width, std::max(0.0, bottom)});
+            m_view->setTopInset(m_headerHeight + (m_viewMethod == Preferences::List ? kSmallSpacing : 0));
+            m_backdrop->setBaseColor(ui::Theme::current().secondBackground);
+            m_backdrop->setVisible(m_view->topInset() > 0);
+            m_backdrop->setGeometry({0, 0, width, m_view->headerHeight()});
+        }
+        m_pathStrip->setVisible(path);
+        m_pathStrip->setGeometry({0, bottom, rect.width, pathHeight});
+        m_status->setGeometry({0, rect.height - statusHeight, rect.width, statusHeight});
     }
 
     const FolderModel& model = *m_model;
@@ -272,6 +362,8 @@ void FolderPage::paint(ui::Painter& painter)
 void FolderPage::openUrl(const std::string& url)
 {
     m_model->setUrl(url);
+    if (m_columns)
+        m_columns->updatePath(true);
     focusView();
 }
 

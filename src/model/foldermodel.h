@@ -77,6 +77,7 @@ public:
     FileItemPtr item(int row) const { return m_contents.item(row); }
     int rowForUrl(const std::string& url) const { return m_contents.rowForUrl(url); }
     FolderContents& contents() { return m_contents; }
+    const FolderContents& contents() const { return m_contents; }
     const FileItem& rootItem() const { return m_lister.rootItem(); }
 
     // What the views show for a row.
@@ -109,9 +110,14 @@ public:
     int sortMode() const { return m_sortMode; }
     void setSortMode(int mode);
     bool sortDesc() const { return m_sortDesc; }
+    void setGroupBy(int group);
+    void setTagFilter(int tag);
+    int tagFilter() const { return m_tagFilter; }
     void setSortDesc(bool descending);
     void setSortDirsFirst(bool first)
     {
+        if (m_sortDirsFirst == first)
+            return;
         m_sortDirsFirst = first;
         rebuildContents();
     }
@@ -296,6 +302,8 @@ private:
     std::string m_url;
     Status m_status = Status::None;
     int m_sortMode = 0;
+    int m_groupBy = 0;
+    int m_tagFilter = -1;
     bool m_sortDesc = false;
     bool m_sortDirsFirst = true;
     bool m_showHiddenFiles = false;

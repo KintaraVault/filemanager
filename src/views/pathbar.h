@@ -96,6 +96,7 @@ public:
 
     void setFolderModel(FolderModel* model);
     void updateUrl(const std::string& url);
+    void setFolderTitle(std::string title);
     // The editor's placeholder; the crumbs follow the next updateUrl().
     void retranslate();
     void openEditor();
@@ -133,6 +134,8 @@ private:
     std::string m_url;
     bool m_editing = false;
     Breadcrumbs* m_crumbs;
+    ui::Label* m_title;
+    bool m_titleMode = false;
     ui::TextField* m_editor;
     ui::Icon* m_clear;
     base::Timer m_debounce;

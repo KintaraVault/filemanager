@@ -19,6 +19,13 @@ struct ListColumns
 {
     double availableWidth = 0;
     bool trash = false;
+    bool compact = false;
+    bool date = true;
+    bool size = true;
+    bool kind = true;
+    bool created = false;
+    bool accessed = false;
+    static constexpr double extraDateWidth = 150;
     double originWidth = 200;
     double dateWidth = 180;
     double sizeWidth = 96;
@@ -41,6 +48,8 @@ struct ListColumns
     double dateX() const { return originX() + (showOrigin() ? originWidth : 0); }
     double sizeX() const { return dateX() + (showDate() ? dateWidth : 0); }
     double typeX() const { return sizeX() + (showSize() ? sizeWidth : 0); }
+    double createdX() const { return typeX() + (showType() ? typeWidth : 0); }
+    double accessedX() const { return createdX() + (created ? extraDateWidth : 0); }
 
     int dateSortMode() const { return trash ? 8 : 2; }
 
@@ -52,7 +61,7 @@ struct ListColumns
 class FolderListView : public FolderView
 {
 public:
-    explicit FolderListView(FolderModel& model);
+    explicit FolderListView(FolderModel& model, bool compact = false, bool browser = false);
     ~FolderListView() override;
 
     double headerHeight() const override;
@@ -68,6 +77,7 @@ public:
     double topMargin() const { return headerHeight() + 2; }
     double bottomMargin() const { return 6 + bottomInset(); }
     ui::RectF rowRect(int index) const;
+    bool hasDisclosure() const { return m_browser && !m_columns.compact; }
 
     // For the rows.
     bool isDropTarget(int index) const { return dropTargetIndex() == index; }
@@ -83,6 +93,8 @@ protected:
     void updateItems() override;
     bool navigate(const ui::KeyEvent& event) override;
     double minimumContentHeight() const override;
+    double minimumContentWidth() const override;
+    void positionChanged() override;
     std::optional<ui::RectF> dragRect(int index) const override;
     void forEachItemView(const std::function<void(int index, ui::View* item)>& visit) const override;
     void paintDragItem(int index, ui::Painter& painter, const ui::RectF& rect) override;
@@ -91,11 +103,15 @@ protected:
 private:
     void moveCurrentIndex(int index, uint32_t modifiers);
     void loadColumns();
+    int sectionCountBefore(int row) const;
+    int nextRowAt(double y) const;
 
     ListColumns m_columns;
+    bool m_browser;
     ListHeader* m_header;
     std::map<int, ListRow*> m_rows;
     std::vector<ListRow*> m_spare;
+    std::vector<ui::View*> m_sectionLabels;
     base::Subscription m_preferences;
 };
 

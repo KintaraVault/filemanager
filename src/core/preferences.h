@@ -25,6 +25,8 @@ public:
     enum ViewMethod {
         List = 0,
         Grid = 1,
+        Columns = 2,
+        Gallery = 3,
     };
 
     // Sort columns, the directory model's.
@@ -33,9 +35,16 @@ public:
         Size = 1,
         ModifiedTime = 2,
         Type = 3,
+        CreatedTime = 4,
+        AccessedTime = 5,
         OriginalPath = 7,
         DeletionTime = 8,
     };
+
+    enum GroupBy { NoGroup, KindGroup, NameGroup, ModifiedGroup, CreatedGroup, ApplicationGroup, SizeGroup, TagsGroup };
+    enum Option { PathBar, StatusBar, PreviewPane, ColumnPreview, ColumnFit, FoldersFirst,
+                  ListDate, ListSize, ListKind, ListCreated, ListAccessed, GalleryNames,
+                  SidebarFavorites, SidebarLocations, SidebarTags };
 
     static Preferences& instance();
     // For tests: another file.
@@ -44,6 +53,17 @@ public:
 
     int viewMethod() const { return m_viewMethod; }
     void setViewMethod(int method);
+    int groupBy() const { return m_groupBy; }
+    void setGroupBy(int group);
+    bool option(Option key) const { return m_options & (1u << key); }
+    void setOption(Option key, bool enabled);
+    int toolbarDisplay() const { return m_toolbarDisplay; }
+    void setToolbarDisplay(int display);
+    const std::vector<std::string>& toolbarOrder() const { return m_toolbarOrder; }
+    void setToolbarOrder(std::vector<std::string> order);
+    static const std::vector<std::string>& defaultToolbar();
+    std::vector<std::string> iconPositions(const std::string& url) const;
+    void setIconPositions(const std::string& url, const std::vector<std::string>& positions);
 
     int sortMode() const { return m_sortMode; }
     bool sortDesc() const { return m_sortDesc; }
@@ -87,6 +107,11 @@ private:
     std::unique_ptr<base::Settings> m_settings;
     bool m_readOnly = false;
     int m_viewMethod = Grid;
+    int m_groupBy = NoGroup;
+    unsigned m_options = (1u << ColumnPreview) | (1u << FoldersFirst) | (1u << ListDate) | (1u << ListSize)
+            | (1u << ListKind) | (1u << GalleryNames) | (1u << SidebarFavorites) | (1u << SidebarLocations) | (1u << SidebarTags);
+    int m_toolbarDisplay = 0;
+    std::vector<std::string> m_toolbarOrder = defaultToolbar();
     int m_sortMode = Name;
     bool m_sortDesc = false;
     int m_trashSortMode = DeletionTime;

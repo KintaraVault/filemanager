@@ -58,6 +58,7 @@ public:
     void goForward();
     // Quick Look follows this page while it is the window's current one.
     void activatePreview();
+    void quickLook();
     // The text in the language of now; the view, its scroll position and
     // an open rename stay.
     void retranslate();
@@ -74,15 +75,21 @@ protected:
 
 private:
     void createView();
+    void updateDetails();
     void restoreViewPosition(bool complete);
     bool handleKey(const ui::KeyEvent& event);
 
     std::unique_ptr<FolderModel> m_model;
     std::unique_ptr<PreviewClient> m_preview;
     FolderView* m_view = nullptr;
+    ui::View* m_viewRoot = nullptr;
+    class ColumnBrowser* m_columns = nullptr;
+    class FilePreviewPane* m_gallery = nullptr;
+    class FilePreviewPane* m_inspector = nullptr;
     ui::HeaderBackdrop* m_backdrop = nullptr;
     ui::Label* m_noResults;
     class SearchPathStrip* m_pathStrip = nullptr;
+    ui::Label* m_status;
     double m_headerHeight = 0;
     int m_viewMethod = -1;
     double m_pendingViewPosition = NAN;

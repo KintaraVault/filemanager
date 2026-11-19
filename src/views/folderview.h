@@ -112,6 +112,8 @@ public:
     }
     // A double click on an item, instead of opening the selection; its model row.
     std::function<void(int row)> onActivated;
+    // After a plain click has settled the selection, not after a drag.
+    std::function<void(int row)> onItemClicked;
     // A key the view does not take.
     std::function<bool(const ui::KeyEvent&)> onKeyPressed;
     base::Signal<> currentIndexChanged;
@@ -137,6 +139,7 @@ protected:
     // The cell a new file or a drop at a content position lands on, -1 where
     // files have no fixed cells.
     virtual int cellAt(ui::PointF) const { return -1; }
+    virtual bool rearrange(const std::vector<std::string>&, int, uint32_t, ui::PointF, bool) { return false; }
     // Selects what the band (content coordinates) covers.
     virtual void rectangleSelect(const ui::RectF& band) = 0;
     // The item rect a rename edits over, in this view's coordinates; the
@@ -150,6 +153,7 @@ protected:
     // The arrow keys and the rest of the navigation; true when taken.
     virtual bool navigate(const ui::KeyEvent& event) = 0;
     virtual double minimumContentHeight() const;
+    virtual double minimumContentWidth() const { return 0; }
     // Pixels from the band's edge to the view's edges where autoscroll starts.
     virtual double dragScrollEdge() const { return m_rubberBand ? 24 : 48; }
     // Whether the content scrolls while dragging over the edges.

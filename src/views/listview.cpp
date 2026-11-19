@@ -4,12 +4,14 @@
 #include "views/colors.h"
 #include "views/listview.h"
 #include "core/preferences.h"
+#include "core/dates.h"
 #include "core/thumbnails.h"
 #include "model/foldermodel.h"
 #include "views/style.h"
 
 #include "base/i18n.h"
 #include "ui/color_provider.h"
+#include "ui/header_button.h"
 #include "ui/icon.h"
 #include "ui/icon_image.h"
 #include "ui/image_view.h"
@@ -29,10 +31,11 @@ using ui::rounding::centeredStart;
 using cutefish::i18n::tr;
 
 static constexpr double kSmallSpacing = 6;
+static constexpr double kSectionHeight = 29;
 
 double ListColumns::rowHeight()
 {
-    return std::max(28.0, std::round(style::fontHeight() + 12));
+    return std::max(24.0, std::round(style::fontHeight() + 8));
 }
 
 double ListColumns::headerHeight()
@@ -47,28 +50,28 @@ static double originRequired(const ListColumns& columns)
 
 bool ListColumns::showOrigin() const
 {
-    return trash && availableWidth >= originRequired(*this);
+    return !compact && trash && availableWidth >= originRequired(*this);
 }
 
 bool ListColumns::showDate() const
 {
-    return (!trash || showOrigin()) && availableWidth >= originRequired(*this) + dateWidth;
+    return !compact && (trash || date);
 }
 
 bool ListColumns::showSize() const
 {
-    return showDate() && availableWidth >= originRequired(*this) + dateWidth + sizeWidth;
+    return !compact && (trash || size);
 }
 
 bool ListColumns::showType() const
 {
-    return !trash && showSize() && availableWidth >= minimumNameWidth + dateWidth + sizeWidth + typeWidth;
+    return !compact && !trash && kind;
 }
 
 double ListColumns::nameWidth() const
 {
     return availableWidth - (showOrigin() ? originWidth : 0) - (showDate() ? dateWidth : 0)
-            - (showSize() ? sizeWidth : 0) - (showType() ? typeWidth : 0);
+            - (showSize() ? sizeWidth : 0) - (showType() ? typeWidth : 0) - extraDateWidth * (created + accessed);
 }
 
 // The columns that can be resized, by their leading edge.
@@ -88,7 +91,7 @@ public:
         : m_list(list)
     {
         setName("listHeader");
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < 7; ++i) {
             m_titles[i] = addChild<ui::Label>();
             m_titles[i]->setElide(ui::Label::Elide::Right);
             m_chevrons[i] = addChild<ui::Icon>("chevron-up", 12);
@@ -124,6 +127,8 @@ protected:
              false},
             {c.sizeX(), c.sizeWidth, c.showSize(), tr("Size"), 1, true},
             {c.typeX(), c.typeWidth, c.showType(), tr("Kind"), 3, false},
+            {c.createdX(), c.extraDateWidth, c.created, tr("Date Created"), Preferences::CreatedTime, false},
+            {c.accessedX(), c.extraDateWidth, c.accessed, tr("Date Accessed"), Preferences::AccessedTime, false},
         };
     }
 
@@ -286,8 +291,8 @@ protected:
 
 private:
     FolderListView* m_list;
-    ui::Label* m_titles[5];
-    ui::Icon* m_chevrons[5];
+    ui::Label* m_titles[7];
+    ui::Icon* m_chevrons[7];
     std::optional<ui::Color> m_background;
     ui::PointF m_hover {-100, -100};
     std::optional<ui::PointF> m_pressed;
@@ -316,6 +321,13 @@ public:
         m_emblem = addChild<ui::ThemeIcon>("emblem-symbolic-link", 12);
         m_emblem->setImageProviderLookup(true);
         m_name = addChild<ui::Label>();
+        m_branch = addChild<ui::Icon>("chevron-right-small", 12);
+        m_disclosure = addChild<ui::HeaderButton>(std::string(), 16);
+        m_disclosure->setName("folderDisclosure");
+        m_disclosure->onClicked = [this] {
+            if (m_item)
+                m_list->model().contents().toggleExpansion(m_item->url, m_list->model().showHiddenFiles());
+        };
         m_name->setElide(ui::Label::Elide::Middle);
         for (ui::Label*& label : m_columns) {
             label = addChild<ui::Label>();
@@ -335,8 +347,14 @@ public:
             return;
         const ListColumns& c = m_list->columns();
         const bool selected = model.isSelected(index);
-        const bool previousSelected = selected && index > 0 && model.isSelected(index - 1);
-        const bool nextSelected = selected && index + 1 < model.count() && model.isSelected(index + 1);
+        const auto& sections = model.contents().sections();
+        const auto sectionAt = [&](int row) {
+            const auto found = std::lower_bound(sections.begin(), sections.end(), row,
+                    [](const auto& section, int row) { return section.first < row; });
+            return found != sections.end() && found->first == row;
+        };
+        const bool previousSelected = selected && index > 0 && model.isSelected(index - 1) && !sectionAt(index);
+        const bool nextSelected = selected && index + 1 < model.count() && model.isSelected(index + 1) && !sectionAt(index + 1);
         const bool dropTarget = m_list->isDropTarget(index);
         const bool dropAllowed = dropTarget && m_list->dropAllowed();
         const bool thumbnail = model.showsThumbnail(index);
@@ -370,18 +388,27 @@ public:
         if (icon != m_icon->name())
             m_icon->setName(icon);
         m_emblem->setVisible(item->isLink);
-        m_name->setText(item->name);
+        m_name->setText(model.displayName(index));
+        if (m_list->hasDisclosure()) {
+            const bool folder = item->isDir && !item->isLink && item->isLocalFile() && !model.isSearching();
+            m_disclosure->setVisible(folder);
+            m_disclosure->setGlyph(model.contents().isExpanded(item->url) ? "chevron-down-small" : "chevron-right-small", 12);
+        } else {
+            m_disclosure->setVisible(false);
+        }
         m_name->setColor(primary);
         m_name->setOpacity(textOpacity);
         m_name->setVisible(m_list->renamingIndex() != index);
 
         const std::string texts[] = {
             c.showOrigin() ? model.originalPathText(index) : std::string(),
-            model.fileSizeText(index),
-            model.fileTypeText(index),
-            c.trash ? model.deletedDateText(index) : model.modifiedDateText(index),
+            c.showSize() ? model.fileSizeText(index) : std::string(),
+            c.showType() ? model.fileTypeText(index) : std::string(),
+            c.showDate() ? (c.trash ? model.deletedDateText(index) : model.modifiedDateText(index)) : std::string(),
+            c.created ? dates::columnTime(item->created) : std::string(),
+            c.accessed ? dates::columnTime(item->accessed) : std::string(),
         };
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 6; ++i) {
             m_columns[i]->setText(texts[i]);
             m_columns[i]->setColor(secondary);
             m_columns[i]->setOpacity(textOpacity);
@@ -400,7 +427,9 @@ protected:
         const ListColumns& c = m_list->columns();
         const double height = geometry().height;
         const double size = ListColumns::iconSize;
-        const ui::RectF icon {c.cellPadding, centeredStart(height, size), size, size};
+        const double indent = m_list->hasDisclosure() ? 18 + std::min(12, m_list->model().contents().depth(m_index)) * 14 : 0;
+        const ui::RectF icon {c.cellPadding + indent, centeredStart(height, size), size, size};
+        m_disclosure->setGeometry({icon.x - 19, centeredStart(height, 16), 16, 16});
         m_icon->setGeometry(icon);
         // The theme's 96 px picture, drawn small, picks the full-colour variant.
         const ui::Window* window = this->window();
@@ -413,7 +442,10 @@ protected:
         m_emblem->setGeometry({icon.x + icon.width - 12 + 2, icon.y + icon.height - 12 + 2, 12, 12});
 
         const double nameX = icon.x + size + kSmallSpacing + 2;
-        const double nameRight = c.nameWidth() - c.cellPadding;
+        const bool branch = c.compact && m_item && m_item->isDir;
+        m_branch->setVisible(branch);
+        m_branch->setGeometry({geometry().width - 15, centeredStart(height, 12), 12, 12});
+        const double nameRight = c.nameWidth() - c.cellPadding - (branch ? 8 : 0);
         const ui::SizeF nameHint = m_name->sizeHint();
         m_name->setGeometry({nameX, centeredStart(height, nameHint.height), std::max(0.0, nameRight - nameX),
                              nameHint.height});
@@ -423,9 +455,11 @@ protected:
             {c.sizeX(), c.sizeWidth},
             {c.typeX(), c.typeWidth},
             {c.dateX(), c.dateWidth},
+            {c.createdX(), c.extraDateWidth},
+            {c.accessedX(), c.extraDateWidth},
         };
-        const bool shown[] = {c.showOrigin(), c.showSize(), c.showType(), c.showDate()};
-        for (int i = 0; i < 4; ++i) {
+        const bool shown[] = {c.showOrigin(), c.showSize(), c.showType(), c.showDate(), c.created, c.accessed};
+        for (int i = 0; i < 6; ++i) {
             ui::Label* label = m_columns[i];
             label->setVisible(shown[i]);
             const ui::SizeF hint = label->sizeHint();
@@ -448,7 +482,7 @@ protected:
         ui::Color fill {0, 0, 0, 0};
         if (m_selected)
             fill = theme.highlight;
-        else if (m_index % 2 == 1)
+        else if (!m_boundColumns.compact && m_index % 2 == 1)
             fill = ui::color(FmColor::AlternateRow);
         if (fill.a == 0)
             return;
@@ -579,17 +613,23 @@ private:
     ui::ImageView* m_thumbnail;
     ui::ThemeIcon* m_emblem;
     ui::Label* m_name;
+    ui::Icon* m_branch;
+    ui::HeaderButton* m_disclosure;
     // Original location, size, kind, date.
-    ui::Label* m_columns[4];
+    ui::Label* m_columns[6];
     std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
 };
 
-FolderListView::FolderListView(FolderModel& model)
+FolderListView::FolderListView(FolderModel& model, bool compact, bool browser)
     : FolderView(model)
+    , m_browser(browser)
 {
     setName("FolderListView");
+    m_columns.compact = compact;
+    setScrollDirections(browser && !compact, true);
     loadColumns();
     m_header = addChild<ListHeader>(this);
+    m_header->setVisible(!compact);
     m_preferences = Preferences::instance().changed.connect([this] {
         loadColumns();
         requestLayout();
@@ -605,11 +645,14 @@ void FolderListView::loadColumns()
     m_columns.dateWidth = preferences.listDateColumnWidth();
     m_columns.sizeWidth = preferences.listSizeColumnWidth();
     m_columns.typeWidth = preferences.listTypeColumnWidth();
+    m_columns.date = preferences.option(Preferences::ListDate);
+    m_columns.size = preferences.option(Preferences::ListSize);
+    m_columns.kind = preferences.option(Preferences::ListKind);
 }
 
 double FolderListView::headerHeight() const
 {
-    return topInset() + ListColumns::headerHeight();
+    return topInset() + (m_columns.compact ? 0 : ListColumns::headerHeight());
 }
 
 void FolderListView::sortBy(int mode)
@@ -653,11 +696,24 @@ void FolderListView::setColumnWidth(int column, double width, bool save)
 
 void FolderListView::layout()
 {
-    m_columns.availableWidth = std::max(0.0, geometry().width - leftMargin() - rightMargin());
     m_columns.trash = model().isTrash();
+    m_columns.created = !m_columns.compact && !m_columns.trash && Preferences::instance().option(Preferences::ListCreated);
+    m_columns.accessed = !m_columns.compact && !m_columns.trash && Preferences::instance().option(Preferences::ListAccessed);
+    m_columns.availableWidth = std::max(0.0, geometry().width - leftMargin() - rightMargin());
+    if (!m_columns.compact && m_browser)
+        m_columns.availableWidth = std::max(m_columns.availableWidth, ListColumns::minimumNameWidth
+                + (m_columns.trash ? m_columns.originWidth : 0) + (m_columns.showDate() ? m_columns.dateWidth : 0)
+                + (m_columns.showSize() ? m_columns.sizeWidth : 0) + (m_columns.showType() ? m_columns.typeWidth : 0)
+                + m_columns.extraDateWidth * (m_columns.created + m_columns.accessed));
+    else if (!m_columns.compact) {
+        m_columns.date = m_columns.availableWidth >= originRequired(m_columns) + m_columns.dateWidth;
+        m_columns.size = m_columns.date && m_columns.availableWidth >= originRequired(m_columns) + m_columns.dateWidth + m_columns.sizeWidth;
+        m_columns.kind = m_columns.size && m_columns.availableWidth >= originRequired(m_columns) + m_columns.dateWidth + m_columns.sizeWidth + m_columns.typeWidth;
+        m_columns.created = m_columns.accessed = false;
+    }
     FolderView::layout();
     m_header->setBackground(topInset() > 0 ? std::nullopt : std::optional(ui::Theme::current().secondBackground));
-    m_header->setGeometry({0, topInset(), geometry().width, ListColumns::headerHeight()});
+    m_header->setGeometry({-scrollPosition().x, topInset(), m_columns.availableWidth + leftMargin() + rightMargin(), ListColumns::headerHeight()});
     raiseChild(m_header);
     m_header->requestLayout();
 }
@@ -665,23 +721,59 @@ void FolderListView::layout()
 double FolderListView::minimumContentHeight() const
 {
     return std::max(geometry().height,
-                    topMargin() + model().count() * ListColumns::rowHeight() + bottomMargin());
+                    topMargin() + model().count() * ListColumns::rowHeight() + bottomMargin()
+                            + model().contents().sections().size() * kSectionHeight);
+}
+
+int FolderListView::sectionCountBefore(int row) const
+{
+    const auto& sections = model().contents().sections();
+    return int(std::upper_bound(sections.begin(), sections.end(), row,
+            [](int row, const auto& section) { return row < section.first; }) - sections.begin());
+}
+
+int FolderListView::nextRowAt(double y) const
+{
+    int low = 0;
+    int high = model().count();
+    while (low < high) {
+        const int mid = low + (high - low) / 2;
+        if (rowRect(mid).y + ListColumns::rowHeight() <= y)
+            low = mid + 1;
+        else
+            high = mid;
+    }
+    return low;
+}
+
+double FolderListView::minimumContentWidth() const
+{
+    return m_columns.availableWidth + leftMargin() + rightMargin();
+}
+
+void FolderListView::positionChanged()
+{
+    FolderView::positionChanged();
+    if (m_header) {
+        auto rect = m_header->geometry();
+        rect.x = -scrollPosition().x;
+        m_header->setGeometry(rect);
+    }
 }
 
 ui::RectF FolderListView::rowRect(int index) const
 {
-    return {leftMargin(), topMargin() + index * ListColumns::rowHeight(), m_columns.availableWidth,
+    return {leftMargin(), topMargin() + index * ListColumns::rowHeight() + sectionCountBefore(index) * kSectionHeight, m_columns.availableWidth,
             ListColumns::rowHeight()};
 }
 
 int FolderListView::indexAt(ui::PointF content) const
 {
-    const double y = content.y - topMargin();
     const double x = content.x - leftMargin();
-    if (y < 0 || x < 0 || x > m_columns.availableWidth)
+    if (x < 0 || x > m_columns.availableWidth)
         return -1;
-    const int index = int(std::floor(y / ListColumns::rowHeight()));
-    return index < model().count() ? index : -1;
+    const int index = nextRowAt(content.y);
+    return index < model().count() && content.y >= rowRect(index).y ? index : -1;
 }
 
 bool FolderListView::hitsItem(int index, ui::PointF content) const
@@ -701,12 +793,8 @@ int FolderListView::dropRowAt(ui::PointF content) const
 
 void FolderListView::rectangleSelect(const ui::RectF& band)
 {
-    const double rowHeight = ListColumns::rowHeight();
-    const double y = band.y - topMargin();
     std::vector<int> indices;
-    const int first = std::max(0, int(std::floor(y / rowHeight)));
-    const int last = std::min(model().count() - 1, int(std::floor((y + band.height) / rowHeight)));
-    for (int i = first; i <= last; ++i)
+    for (int i = nextRowAt(band.y); i < model().count() && rowRect(i).y < band.y + band.height; ++i)
         indices.push_back(i);
     applyRectangleSelection(indices);
 }
@@ -755,6 +843,16 @@ void FolderListView::moveCurrentIndex(int index, uint32_t modifiers)
 
 bool FolderListView::navigate(const ui::KeyEvent& event)
 {
+    if (m_browser && !m_columns.compact && event.modifiers == ui::NoModifier
+        && (event.key == ui::key::Left || event.key == ui::key::Right)) {
+        const auto row = model().currentIndex();
+        const auto item = model().item(row);
+        if (item && item->isDir && !model().isSearching()
+            && model().contents().isExpanded(item->url) != (event.key == ui::key::Right)) {
+            model().contents().toggleExpansion(item->url, model().showHiddenFiles());
+            return true;
+        }
+    }
     const double rowHeight = ListColumns::rowHeight();
     const int page = std::max(1, int(std::floor((geometry().height - headerHeight()) / rowHeight)) - 1);
     switch (event.key) {
@@ -784,12 +882,34 @@ bool FolderListView::navigate(const ui::KeyEvent& event)
 void FolderListView::updateItems()
 {
     View* content = contentView();
-    const double rowHeight = ListColumns::rowHeight();
     const int count = model().count();
-    const double top = scrollPosition().y - topMargin();
+    const double top = scrollPosition().y;
     const double bottom = top + geometry().height;
-    const int first = std::clamp(int(std::floor(top / rowHeight)), 0, count);
-    const int last = std::clamp(int(std::ceil(bottom / rowHeight)), 0, count);
+    const int first = nextRowAt(top);
+    const int last = std::min(count, nextRowAt(bottom) + 1);
+
+    size_t used = 0;
+    const auto& sections = model().contents().sections();
+    auto section = std::lower_bound(sections.begin(), sections.end(), first,
+            [](const auto& section, int row) { return section.first < row; });
+    for (; section != sections.end() && section->first <= last; ++section) {
+        const auto rect = rowRect(section->first);
+        if (rect.y - kSectionHeight >= bottom)
+            break;
+        if (used == m_sectionLabels.size()) {
+            auto* label = content->addChild<ui::Label>();
+            label->setWeight(650);
+            label->setFontSize(12);
+            label->setVerticallyCentered(true);
+            m_sectionLabels.push_back(label);
+        }
+        auto* label = static_cast<ui::Label*>(m_sectionLabels[used++]);
+        label->setVisible(true);
+        label->setText(section->second);
+        label->setGeometry({rect.x + 10 + scrollPosition().x, rect.y - kSectionHeight, viewportWidth() - 30, kSectionHeight});
+    }
+    for (; used < m_sectionLabels.size(); ++used)
+        m_sectionLabels[used]->setVisible(false);
 
     for (auto it = m_rows.begin(); it != m_rows.end();) {
         if (it->first < first || it->first >= last) {

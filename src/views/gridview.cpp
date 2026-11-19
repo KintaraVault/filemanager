@@ -7,6 +7,7 @@
 #include "views/style.h"
 
 #include "ui/image_view.h"
+#include "ui/drag.h"
 #include "ui/keys.h"
 #include "ui/label.h"
 #include "ui/painter.h"
@@ -15,6 +16,7 @@
 #include "ui/window.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 
 namespace fm {
@@ -30,6 +32,7 @@ static constexpr double kLabelInset = 4;
 // A column takes its cell and 10 px; the width keeps another 6.
 static constexpr double kColumnSpacing = 10;
 static constexpr double kEndMargin = 6;
+static constexpr double kSectionHeight = 32;
 
 GridColumns GridColumns::forWidth(double width, double iconSize)
 {
@@ -181,25 +184,143 @@ void FolderGridView::reflow(int fromColumns, double fromRowHeight)
 void FolderGridView::layout()
 {
     updateMetrics();
+    updatePositions();
     FolderView::layout();
+}
+
+void FolderGridView::updatePositions()
+{
+    if (m_folder != model().resolvedUrl()) {
+        m_folder = model().resolvedUrl();
+        m_saved.clear();
+        const auto list = Preferences::instance().iconPositions(m_folder);
+        for (size_t i = 1; i < list.size(); i += 2) {
+            int cell = 0;
+            const auto& number = list[i];
+            auto result = std::from_chars(number.data(), number.data() + number.size(), cell);
+            if (result.ec == std::errc() && result.ptr == number.data() + number.size() && cell >= 0)
+                m_saved.emplace(list[i - 1], cell);
+        }
+    }
+    m_sections.clear();
+    m_cells.clear();
+    m_itemCells.clear();
+    int gridRow = 0;
+    const auto& sections = model().contents().sections();
+    for (size_t i = 0; i < sections.size(); ++i) {
+        const auto& [first, name] = sections[i];
+        const int end = i + 1 == sections.size() ? model().count() : sections[i + 1].first;
+        m_sections.push_back({first, gridRow, name});
+        gridRow += (end - first + m_grid.count - 1) / m_grid.count;
+    }
+    if (!sections.empty() || m_saved.empty() || model().isTrash() || model().isSearching())
+        return;
+    m_itemCells.resize(model().count(), -1);
+    const int limit = model().count() + 512;
+    for (const auto& [url, cell] : m_saved) {
+        const int row = model().rowForUrl(url);
+        if (row < 0 || cell >= limit)
+            continue;
+        if (cell >= int(m_cells.size()))
+            m_cells.resize(cell + 1, -1);
+        if (m_cells[cell] < 0) {
+            m_cells[cell] = row;
+            m_itemCells[row] = cell;
+        }
+    }
+    int free = 0;
+    for (int row = 0; row < model().count(); ++row) {
+        if (m_itemCells[row] >= 0)
+            continue;
+        while (free < int(m_cells.size()) && m_cells[free] >= 0)
+            ++free;
+        if (free == int(m_cells.size()))
+            m_cells.push_back(-1);
+        m_cells[free] = row;
+        m_itemCells[row] = free++;
+    }
+}
+
+int FolderGridView::cellCount() const { return m_cells.empty() ? model().count() : int(m_cells.size()); }
+int FolderGridView::rowOf(int index) const
+{
+    return m_cells.empty() ? index : index >= 0 && index < int(m_cells.size()) ? m_cells[index] : -1;
+}
+int FolderGridView::indexOfRow(int row) const
+{
+    return m_itemCells.empty() ? row : row >= 0 && row < int(m_itemCells.size()) ? m_itemCells[row] : -1;
+}
+
+void FolderGridView::savePositions()
+{
+    std::vector<std::string> positions;
+    for (const auto& [url, cell] : m_saved) {
+        positions.push_back(url);
+        positions.push_back(std::to_string(cell));
+    }
+    Preferences::instance().setIconPositions(m_folder, positions);
+    requestLayout();
+}
+
+void FolderGridView::cleanUp()
+{
+    m_saved.clear();
+    savePositions();
+}
+
+bool FolderGridView::rearrange(const std::vector<std::string>& urls, int destinationRow, uint32_t action, ui::PointF point, bool apply)
+{
+    if (action != ui::MoveAction || destinationRow >= 0 || model().isTrash() || model().isSearching()
+        || Preferences::instance().groupBy() != Preferences::NoGroup || urls.empty() || point.y < topMargin()
+        || !std::all_of(urls.begin(), urls.end(), [this](const auto& url) { return model().rowForUrl(url) >= 0; }))
+        return false;
+    if (!apply)
+        return true;
+    const int column = std::clamp(int((point.x - m_grid.gap / 2) / (m_grid.cellWidth + m_grid.gap)), 0, m_grid.count - 1);
+    int cell = int((point.y - topMargin()) / m_cellHeight) * m_grid.count + column;
+    cell = std::clamp(cell, 0, model().count() + 500);
+    // Reserve the drop cells before placing the other icons at their old cells.
+    std::map<std::string, int> next;
+    for (const auto& url : urls)
+        next.emplace(url, cell++);
+    const int start = cell - int(urls.size());
+    for (int i = 0; i < model().count(); ++i) {
+        const auto item = model().item(i);
+        const int old = indexOfRow(i);
+        if (item && (old < start || old >= cell))
+            next.try_emplace(item->url, old);
+    }
+    m_saved = std::move(next);
+    savePositions();
+    return true;
 }
 
 double FolderGridView::minimumContentHeight() const
 {
-    const int count = model().count();
-    const int rows = (count + m_grid.count - 1) / m_grid.count;
-    return std::max(geometry().height, topMargin() + rows * m_cellHeight + bottomMargin());
+    const int count = cellCount();
+    const double end = count ? cellRect(count - 1).y + m_cellHeight : topMargin();
+    return std::max(geometry().height, end + bottomMargin());
 }
 
 ui::RectF FolderGridView::cellRect(int index) const
 {
-    const int column = index % m_grid.count;
-    const int row = index / m_grid.count;
+    int offset = index;
+    int gridRow = 0;
+    size_t headers = 0;
+    const auto section = std::upper_bound(m_sections.begin(), m_sections.end(), index,
+            [](int value, const Section& section) { return value < section.first; });
+    if (section != m_sections.begin()) {
+        offset -= (section - 1)->first;
+        gridRow = (section - 1)->gridRow;
+        headers = section - m_sections.begin();
+    }
+    const int column = offset % m_grid.count;
+    const int row = gridRow + offset / m_grid.count;
     const ui::Window* window = this->window();
     const double scale = window ? window->scale() : 1;
     // The gaps are a fraction of a pixel wide; each cell sits on whole device pixels.
     const double x = std::floor(m_grid.x(column) * scale) / scale;
-    return {x, topMargin() + row * m_cellHeight, m_grid.cellWidth, m_cellHeight};
+    return {x, topMargin() + row * m_cellHeight + headers * kSectionHeight, m_grid.cellWidth, m_cellHeight};
 }
 
 int FolderGridView::columnAt(double x) const
@@ -213,53 +334,42 @@ int FolderGridView::columnAt(double x) const
 
 int FolderGridView::indexAt(ui::PointF content) const
 {
-    const double y = content.y - topMargin();
     const int column = columnAt(content.x);
-    if (column < 0 || y < 0)
+    if (column < 0)
         return -1;
-    const int row = int(std::floor(y / m_cellHeight));
-    const int index = row * m_grid.count + column;
-    return index < model().count() ? index : -1;
+    const int first = firstCellAt(content.y);
+    const int index = first + column;
+    if (index >= cellCount() || first >= cellCount())
+        return -1;
+    const auto box = cellRect(index);
+    return box.y <= content.y && content.y < box.y + box.height && rowOf(index) >= 0 ? index : -1;
+}
+
+int FolderGridView::firstCellAt(double y) const
+{
+    int lo = 0, hi = cellCount();
+    while (lo < hi) {
+        const int mid = lo + (hi - lo) / 2;
+        if (cellRect(mid).y + m_cellHeight <= y)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
 }
 
 void FolderGridView::rectangleSelect(const ui::RectF& band)
 {
-    const int count = model().count();
-    const double cellWidth = m_grid.cellWidth - 2 * kSmallSpacing;
-    const double cellHeight = m_cellHeight - 2 * kSmallSpacing;
-    const double pitch = m_grid.cellWidth + m_grid.gap;
-    const double x = band.x;
-    const double y = band.y - topMargin();
-    const int perStripe = m_grid.count;
-    const int stripes = (count + perStripe - 1) / perStripe;
-    const int firstColumn = std::max(0, int(std::floor((x - m_grid.gap) / pitch)) - 1);
-    const int lastColumn = int(std::floor((x + band.width - m_grid.gap) / pitch)) + 1;
-    const int firstRow = std::max(0, int(std::floor(y / m_cellHeight)) - 1);
-    const int lastRow = std::min(stripes - 1, int(std::floor((y + band.height) / m_cellHeight)) + 1);
-    const int lastCell = std::min(perStripe - 1, lastColumn);
-
     std::vector<int> indices;
-    for (int stripe = firstRow; stripe <= lastRow; ++stripe) {
-        for (int cell = firstColumn; cell <= lastCell; ++cell) {
-            const int index = stripe * perStripe + cell;
-            if (index >= count)
-                break;
-            if (model().isBlank(rowOf(index)))
-                continue;
-
-            const double cellX = m_grid.x(cell) + kSmallSpacing;
-            const double cellY = stripe * m_cellHeight + kSmallSpacing;
-            // The cell first, which is cheaper than the item.
-            if (cellX >= x + band.width || x >= cellX + cellWidth || cellY >= y + band.height
-                || y >= cellY + cellHeight)
-                continue;
-
-            // An item answers for its icon and name; one not made has its cell.
-            IconItem* item = itemFor(index);
-            const ui::RectF itemCell = cellRect(index);
-            if (!item || item->intersectsRect({band.x - itemCell.x, band.y - itemCell.y, band.width, band.height}))
-                indices.push_back(index);
-        }
+    for (int index = firstCellAt(band.y); index < cellCount(); ++index) {
+        const auto box = cellRect(index);
+        if (box.y >= band.y + band.height)
+            break;
+        if (model().isBlank(rowOf(index)) || box.x >= band.x + band.width || box.x + box.width <= band.x)
+            continue;
+        const auto* item = itemFor(index);
+        if (!item || item->intersectsRect({band.x - box.x, band.y - box.y, band.width, band.height}))
+            indices.push_back(index);
     }
     applyRectangleSelection(indices);
 }
@@ -279,21 +389,35 @@ void FolderGridView::revealIndex(int index)
 
 void FolderGridView::updateItems()
 {
-    const int count = model().count();
     const double top = scrollPosition().y;
     const double bottom = top + geometry().height;
-    int first = 0;
-    int last = 0;
-    if (count > 0 && m_cellHeight > 0) {
-        const int firstRow = std::max(0, int(std::floor((top - topMargin()) / m_cellHeight)));
-        const int lastRow = std::max(0, int(std::ceil((bottom - topMargin()) / m_cellHeight)));
-        first = std::min(count, firstRow * m_grid.count);
-        last = std::min(count, lastRow * m_grid.count);
+    const int first = firstCellAt(top);
+    const int last = std::min(cellCount(), firstCellAt(bottom) + m_grid.count);
+
+    size_t shown = 0;
+    for (const auto& section : m_sections) {
+        const double y = cellRect(section.first).y;
+        if (y < top || y - kSectionHeight >= bottom)
+            continue;
+        if (shown == m_headers.size()) {
+            auto* label = contentView()->addChild<ui::Label>();
+            label->setWeight(650);
+            label->setFontSize(12);
+            label->setVerticallyCentered(true);
+            m_headers.push_back(label);
+        }
+        auto* label = m_headers[shown++];
+        label->setVisible(true);
+        label->setText(section.name);
+        label->setGeometry({std::max(12.0, m_grid.gap), y - kSectionHeight, std::max(0.0, geometry().width - 24), kSectionHeight});
     }
+    for (; shown < m_headers.size(); ++shown)
+        m_headers[shown]->setVisible(false);
 
     recycleItems([first, last](int index) { return index >= first && index < last; });
     for (int index = first; index < last; ++index)
-        showItem(index);
+        if (rowOf(index) >= 0 && rowOf(index) < model().count())
+            showItem(index);
 }
 
 bool FolderGridView::navigate(const ui::KeyEvent& event)
@@ -319,12 +443,14 @@ bool FolderGridView::navigate(const ui::KeyEvent& event)
     else
         return false;
 
-    const int count = model().count();
+    const int count = cellCount();
     if (count <= 0)
         return true;
     // A packed grid: plain index arithmetic, nothing past either end.
     const int from = keyboardIndex(step > 0);
-    const int next = from < 0 ? 0 : from + step;
+    int next = from < 0 ? 0 : from + step;
+    while (next >= 0 && next < count && rowOf(next) < 0)
+        next += from < 0 ? 1 : step;
     if (next < 0 || next >= count)
         return true;
     setCurrentIndex(next);

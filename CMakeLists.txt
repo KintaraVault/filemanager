@@ -127,7 +127,7 @@ add_library(fm-core STATIC
     src/ops/operations.cpp
 )
 target_include_directories(fm-core PUBLIC src)
-target_link_libraries(fm-core PUBLIC Cutefish::Toolkit Cutefish::Files Cutefish::FilesThumbnails)
+target_link_libraries(fm-core PUBLIC Cutefish::Toolkit Cutefish::Files Cutefish::FilesThumbnails PkgConfig::ICU)
 
 # The browser window, its views and dialogs.
 add_library(fm-ui STATIC
@@ -140,6 +140,7 @@ add_library(fm-ui STATIC
     src/views/gridview.cpp
     src/views/icongridview.cpp
     src/views/listview.cpp
+    src/views/browserviews.cpp
     src/views/pathbar.cpp
     src/views/previewclient.cpp
     src/views/renameeditor.cpp

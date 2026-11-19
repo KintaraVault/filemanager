@@ -260,7 +260,7 @@ FolderModel::~FolderModel()
 
 void FolderModel::rebuildContents()
 {
-    m_contents.setQuery({m_sortMode, m_sortDesc, m_sortDirsFirst});
+    m_contents.setQuery({m_sortMode, m_sortDesc, m_sortDirsFirst, m_groupBy, m_tagFilter});
 }
 
 void FolderModel::setStatus(Status status)
@@ -515,6 +515,22 @@ void FolderModel::setSortMode(int mode)
     m_sortMode = mode;
     rebuildContents();
     sortChanged.emit();
+}
+
+void FolderModel::setGroupBy(int group)
+{
+    if (m_groupBy != group) {
+        m_groupBy = group;
+        rebuildContents();
+    }
+}
+
+void FolderModel::setTagFilter(int tag)
+{
+    m_tagFilter = std::clamp(tag, -1, 6);
+    if (m_tagFilter >= 0)
+        m_contents.collapseAll();
+    m_contents.setQuery({m_sortMode, m_sortDesc, m_sortDirsFirst, m_groupBy, m_tagFilter});
 }
 
 void FolderModel::setSortDesc(bool descending)
@@ -913,6 +929,7 @@ void FolderModel::followShowHiddenFiles()
     if (m_showHiddenFiles == show)
         return;
     m_showHiddenFiles = show;
+    m_contents.setTreeHidden(show);
     m_lister.setShowHiddenFiles(show);
     m_lister.refresh();
     showHiddenFilesChanged.emit();

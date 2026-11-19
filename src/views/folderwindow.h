@@ -107,6 +107,11 @@ private:
     void updateBlur();
     void updateTabBar();
     void showContextMenu(ui::PointF position);
+    void toolbarAction(const std::string& id, ui::PointF position);
+    void setToolbarEditing(bool editing);
+    void populateViewOptions(ui::Menu& menu);
+    void populateGrouping(ui::Menu& menu);
+    void populateSidebarSettings(ui::Menu& menu);
     // The menus the menu bar shows while the window is active.
     void buildMainMenu();
     void showAbout();

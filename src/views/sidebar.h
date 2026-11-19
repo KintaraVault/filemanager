@@ -54,6 +54,7 @@ public:
     void connectToServer();
 
     std::function<void(const std::string& path)> onClicked;
+    std::function<void(int tag)> onTagClicked;
     std::function<void(const std::string& path)> onOpenInNewTab;
     std::function<void(const std::string& path)> onOpenInNewWindow;
 

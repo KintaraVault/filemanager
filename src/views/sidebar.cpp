@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "views/sidebar.h"
+#include "core/preferences.h"
+#include "core/filetags.h"
 #include "dialogs/serverdialogs.h"
 #include "dialogs/unlockdialog.h"
 #include "model/places.h"
@@ -15,6 +17,7 @@
 #include "ui/dialog_window.h"
 #include "ui/drag.h"
 #include "ui/icon.h"
+#include "ui/button.h"
 #include "ui/label.h"
 #include "ui/menu.h"
 #include "ui/painter.h"
@@ -31,6 +34,12 @@ using cutefish::i18n::tr;
 namespace fm {
 
 static constexpr double kSmallSpacing = 6;
+
+static bool shownInSidebar(const PlacesModel::Place& place)
+{
+    const auto& prefs = Preferences::instance();
+    return prefs.option(place.category == "Favorites" ? Preferences::SidebarFavorites : Preferences::SidebarLocations);
+}
 
 // Where a place is now: disks come and go, and favourites change in other
 // windows, while a menu opened on one stays up.
@@ -62,6 +71,12 @@ public:
     {
         setName("places");
         m_favorites = addChild<ui::Label>(tr("Favorites"));
+        m_tags = addChild<ui::Label>(tr("Tags"));
+        for (size_t i = 0; i < filetags::names.size(); ++i) {
+            auto* tag = addChild<ui::Button>(tr(filetags::names[i]));
+            tag->onClicked = [this, i] { if (m_sidebar->onTagClicked) m_sidebar->onTagClicked(int(i)); };
+            m_tagButtons.push_back(tag);
+        }
     }
 
     bool acceptsPointer() const override { return true; }
@@ -71,9 +86,13 @@ public:
         PlacesModel& places = m_sidebar->places();
         const double rowHeight = snap(std::max(32.0, style::fontHeight() + 12));
         const double spacing = snap(3);
-        double y = snap(32);
+        double y = Preferences::instance().option(Preferences::SidebarFavorites) ? snap(32) : 0;
+        bool any = false;
         std::string category = "Favorites";
         for (int i = 0; i < places.count(); ++i) {
+            if (!shownInSidebar(places.at(i)))
+                continue;
+            any = true;
             if (places.at(i).category != category) {
                 category = places.at(i).category;
                 // An unnamed section takes no room.
@@ -82,8 +101,10 @@ public:
             }
             y += rowHeight + spacing;
         }
-        if (places.count() > 0)
+        if (any)
             y -= spacing;
+        if (Preferences::instance().option(Preferences::SidebarTags))
+            y += snap(36) + m_tagButtons.size() * (rowHeight + spacing);
         return y + snap(kSmallSpacing);
     }
 
@@ -112,6 +133,9 @@ public:
     void retranslate()
     {
         m_favorites->setText(tr("Favorites"));
+        m_tags->setText(tr("Tags"));
+        for (size_t i = 0; i < m_tagButtons.size(); ++i)
+            m_tagButtons[i]->setText(tr(filetags::names[i]));
         requestLayout();
     }
 
@@ -171,7 +195,9 @@ protected:
         const double spacing = snap(3);
 
         styleSection(m_favorites);
-        const double headerHeight = snap(32);
+        const bool favorites = Preferences::instance().option(Preferences::SidebarFavorites);
+        m_favorites->setVisible(favorites);
+        const double headerHeight = favorites ? snap(32) : 0;
         m_favorites->setGeometry({inset + kSmallSpacing, 0, std::max(0.0, width - inset - kSmallSpacing), headerHeight});
 
         double y = headerHeight;
@@ -179,6 +205,17 @@ protected:
         for (int i = 0; i < places.count() && size_t(i) < m_rows.size(); ++i) {
             const PlacesModel::Place& place = places.at(i);
             Row& row = m_rows[size_t(i)];
+            const bool visible = shownInSidebar(place);
+            row.icon->setVisible(visible);
+            row.label->setVisible(visible);
+            if (!visible) {
+                row.section->setVisible(false);
+                row.eject->setVisible(false);
+                row.ejectVisible = false;
+                row.rect = {};
+                row.ejectRect = {};
+                continue;
+            }
             if (place.category != category && !place.category.empty()) {
                 category = place.category;
                 styleSection(row.section);
@@ -227,6 +264,17 @@ protected:
 
             y += rowHeight + spacing;
         }
+        const bool tags = Preferences::instance().option(Preferences::SidebarTags);
+        const double left = inset + kSmallSpacing;
+        styleSection(m_tags);
+        m_tags->setVisible(tags);
+        m_tags->setGeometry({left, y, std::max(0.0, width - left * 2), snap(36)});
+        y += snap(36);
+        for (auto* tag : m_tagButtons) {
+            tag->setVisible(tags);
+            tag->setGeometry({left, y, std::max(0.0, width - left * 2), rowHeight});
+            y += rowHeight + spacing;
+        }
     }
 
     void layout() override { place(geometry().width); }
@@ -238,6 +286,8 @@ protected:
         const double inset = sideInset();
         for (int i = 0; i < places.count() && size_t(i) < m_rows.size(); ++i) {
             const Row& row = m_rows[size_t(i)];
+            if (row.rect.height <= 0)
+                continue;
             const bool checked = i == m_selected;
             const bool dropTarget = i == m_dropTargetRow;
             const bool rejected = i == m_dropRejectedRow;
@@ -511,6 +561,8 @@ private:
 
     SideBar* m_sidebar;
     ui::Label* m_favorites;
+    ui::Label* m_tags;
+    std::vector<ui::Button*> m_tagButtons;
     std::vector<Row> m_rows;
     int m_selected = -1;
     int m_pressedRow = -1;
@@ -542,6 +594,10 @@ SideBar::SideBar(double headerHeight)
     m_scroll = addChild<ui::ScrollView>();
     m_list = m_scroll->setContent<SidebarList>(this);
     m_scroll->setVerticalBarPadding(1, kSmallSpacing);
+    m_subscriptions.push_back(Preferences::instance().changed.connect([this] {
+        m_list->requestLayout();
+        m_scroll->requestLayout();
+    }));
 
     m_subscriptions.push_back(m_places->changed.connect([this] {
         m_list->rebuild();

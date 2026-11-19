@@ -42,7 +42,7 @@ public:
 
     bool acceptsPointer() const override { return true; }
     bool acceptsFocus() const override { return true; }
-    ui::SizeF sizeHint() const override { return {0, heightForWidth(0)}; }
+    ui::SizeF sizeHint() const override { return {m_view->minimumContentWidth(), heightForWidth(0)}; }
     double heightForWidth(double) const override { return m_view->minimumContentHeight(); }
 
     void setPointerHandlers()
@@ -531,13 +531,18 @@ void FolderView::pointerMoved(const ui::PointerEvent& event)
 
 void FolderView::pointerReleased(const ui::PointerEvent& event)
 {
-    (void)event;
+    int clicked = -1;
     // A plain click inside a multiple selection narrows it to that item.
     if (m_pressedIndex >= 0 && !m_rubberBand && !m_shiftPressed && !m_ctrlPressed && !m_model.dragging()) {
-        m_model.clearSelection();
+        if (m_model.selectionCount() > 1)
+            m_model.clearSelection();
         m_model.setSelected(rowOf(m_pressedIndex));
+        if (event.button == ui::MouseButton::Left && indexAt(event.position) == m_pressedIndex)
+            clicked = rowOf(m_pressedIndex);
     }
     pressCanceled();
+    if (clicked >= 0 && onItemClicked)
+        onItemClicked(clicked);
 }
 
 void FolderView::clearPressState()
@@ -707,7 +712,7 @@ bool FolderView::updateDropTarget(const std::vector<std::string>& urls, uint32_t
     const int target = row >= 0 && item && !m_model.isBlank(rowOf(index)) && item->isDir && !dragged ? index : -1;
     const uint32_t action = dropActionFor(modifiers, sourceActions,
                                           (modifiers & ui::ControlModifier) ? ui::CopyAction : ui::NoAction);
-    const bool allowed = m_model.canDropUrls(urls, row, action);
+    const bool allowed = rearrange(urls, row, action, content, false) || m_model.canDropUrls(urls, row, action);
     if (target != m_dropTargetIndex || allowed != m_dropTargetAllowed) {
         m_dropTargetIndex = target;
         m_dropTargetAllowed = allowed;
@@ -729,6 +734,10 @@ void FolderView::dropAt(const std::vector<std::string>& urls, uint32_t action, u
 {
     const ui::PointF content = toContent(position);
     const int row = dropRowAt(content);
+    if (rearrange(urls, row, action, content, true)) {
+        clearDropTarget();
+        return;
+    }
     if (!m_model.canDropUrls(urls, row, action)) {
         clearDropTarget();
         return;
@@ -767,7 +776,7 @@ uint32_t FolderView::dragUpdate(const ui::DragEvent& event)
     if (!m_dropUrlsKnown)
         return ui::MoveAction;
     updateDropTarget(m_dropUrls, m_dropSourceActions, event.modifiers, event.position);
-    return dropActionFor(event.modifiers, m_dropSourceActions, ui::NoAction);
+    return dropActionFor(event.modifiers, m_dropSourceActions, (event.modifiers & ui::ControlModifier) ? ui::CopyAction : ui::NoAction);
 }
 
 void FolderView::dragLeave()
@@ -779,7 +788,7 @@ void FolderView::dragLeave()
 uint32_t FolderView::drop(const ui::DragEvent& event)
 {
     stopDragScroll();
-    const uint32_t action = dropActionFor(event.modifiers, m_dropSourceActions, ui::NoAction);
+    const uint32_t action = dropActionFor(event.modifiers, m_dropSourceActions, (event.modifiers & ui::ControlModifier) ? ui::CopyAction : ui::NoAction);
     dropAt(m_dropUrls, action, event.position);
     return action;
 }

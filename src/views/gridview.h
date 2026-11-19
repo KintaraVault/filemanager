@@ -5,6 +5,8 @@
 
 #include "views/icongridview.h"
 
+#include <map>
+
 namespace fm {
 
 // The columns of the browser's icon grid across a width: cells of a fixed
@@ -34,6 +36,7 @@ public:
     void setIconSize(double size);
     void increaseIconSize();
     void decreaseIconSize();
+    void cleanUp();
 
     int columns() const { return m_grid.count; }
     double cellWidth() const { return m_grid.cellWidth; }
@@ -49,6 +52,9 @@ public:
 protected:
     std::unique_ptr<IconItem> makeItem() override;
     int indexAt(ui::PointF content) const override;
+    int rowOf(int index) const override;
+    int indexOfRow(int row) const override;
+    bool rearrange(const std::vector<std::string>& urls, int row, uint32_t action, ui::PointF point, bool apply) override;
     void rectangleSelect(const ui::RectF& band) override;
     void updateItems() override;
     bool navigate(const ui::KeyEvent& event) override;
@@ -64,6 +70,17 @@ private:
     void reflow(int fromColumns, double fromRowHeight);
     // The column under a content x, or -1 in a gap or past the last column.
     int columnAt(double x) const;
+    int firstCellAt(double y) const;
+    int cellCount() const;
+    void updatePositions();
+    void savePositions();
+
+    struct Section { int first; int gridRow; std::string name; };
+    std::string m_folder;
+    std::map<std::string, int> m_saved;
+    std::vector<int> m_cells, m_itemCells;
+    std::vector<Section> m_sections;
+    std::vector<ui::Label*> m_headers;
 
     GridColumns m_grid;
     double m_cellHeight = 0;

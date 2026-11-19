@@ -7,6 +7,7 @@
 #include "base/i18n.h"
 #include "base/locale.h"
 #include "ui/icon.h"
+#include "ui/check_box.h"
 #include "ui/label.h"
 #include "ui/cell_layout.h"
 #include "ui/theme.h"
@@ -14,7 +15,9 @@
 
 #include <algorithm>
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 using cutefish::i18n::tr;
 using cutefish::i18n::trn;
@@ -185,6 +188,39 @@ std::unique_ptr<ui::View> PropertiesDialog::createContent()
         }
         if (row.size)
             m_sizeLabel = value;
+    }
+    if (m_items.size() == 1 && m_items.front()->isLocalFile() && m_items.front()->isFile) {
+        const std::string path = m_items.front()->path;
+        struct stat original {};
+        if (::lstat(path.c_str(), &original) == 0 && S_ISREG(original.st_mode) && original.st_uid == ::geteuid()) {
+            auto* error = layout->addChild<ui::Label>();
+            error->setVisible(false);
+            const auto permission = [&](const char* label, mode_t bit) {
+                auto* box = layout->addChild<ui::CheckBox>(tr(label));
+                box->setChecked(original.st_mode & bit);
+                box->onToggled = [this, box, error, path, original, bit](bool enabled) {
+                    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+                    struct stat current {};
+                    bool success = false;
+                    if (fd >= 0) {
+                        if (::fstat(fd, &current) == 0 && S_ISREG(current.st_mode) && current.st_uid == ::geteuid()
+                            && current.st_dev == original.st_dev && current.st_ino == original.st_ino) {
+                            const mode_t mode = current.st_mode & 07777;
+                            success = ::fchmod(fd, enabled ? mode | bit : mode & ~bit) == 0;
+                        }
+                        ::close(fd);
+                    }
+                    if (!success) {
+                        box->setChecked(!enabled);
+                        error->setText(tr("Could not change file permissions."));
+                    }
+                    error->setVisible(!success);
+                    fit();
+                };
+            };
+            permission(trNoop("Allow executing file as a program"), S_IXUSR);
+            permission(trNoop("Allow owner to modify this file"), S_IWUSR);
+        }
     }
     return layout;
 }

@@ -4,18 +4,22 @@
 #include "views/colors.h"
 #include "views/folderwindow.h"
 #include "core/preferences.h"
+#include "core/filetags.h"
 #include "views/folderview.h"
 #include "dialogs/archivepasswordprompt.h"
 #include "views/foldermenu.h"
+#include "views/gridview.h"
 #include "views/pathbar.h"
 #include "views/sidebar.h"
 #include "views/style.h"
 
 #include "base/event_loop.h"
 #include "base/i18n.h"
+#include "base/url.h"
 #include "ui/about_dialog.h"
 #include "ui/application.h"
 #include "ui/color_provider.h"
+#include "ui/clipboard.h"
 #include "ui/progress_bar.h"
 #include "ui/dialog_window.h"
 #include "ui/header_button.h"
@@ -26,9 +30,11 @@
 #include "ui/painter.h"
 #include "ui/shortcut_convention.h"
 #include "ui/sidebar_divider.h"
+#include "ui/segmented_control.h"
 #include "ui/cell_layout.h"
 #include "ui/theme.h"
 #include "ui/toast.h"
+#include "ui/toolbar.h"
 #include "ui/drag.h"
 #include "ui/window.h"
 #include "ui/window_controls.h"
@@ -36,6 +42,7 @@
 #include "ui/window_tab_bar.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <set>
@@ -45,6 +52,7 @@ namespace fm {
 using ui::rounding::centeredStart;
 using cutefish::i18n::format;
 using cutefish::i18n::tr;
+using cutefish::i18n::trNoop;
 
 static constexpr double kSmallSpacing = 6;
 static constexpr double kLargeSpacing = 12;
@@ -61,6 +69,17 @@ static constexpr double kNewTabButtonSize = 28;
 static constexpr double kNewTabStartGap = 2;
 static constexpr double kNewTabEndMargin = 10;
 static constexpr const char* kTabMimeType = "application/x-cutefish-filemanager-tab";
+
+static constexpr std::array<int, 4> kViews {Preferences::Grid, Preferences::List, Preferences::Columns, Preferences::Gallery};
+static std::vector<std::string> viewNames()
+{
+    return {tr("Icons"), tr("List"), tr("Columns"), tr("Gallery")};
+}
+
+static int viewIndex()
+{
+    return int(std::find(kViews.begin(), kViews.end(), Preferences::instance().viewMethod()) - kViews.begin());
+}
 
 // Where a search looks, home or the folder it started from.
 class SearchScopeBar : public ui::View
@@ -276,23 +295,52 @@ public:
         forward = navigation->forward();
         forward->setName("forwardButton");
         pathBar = addChild<PathBar>();
-        search = addChild<ui::HeaderButton>(std::string(), kButtonSize);
-        search->setGlyph("search", 16);
-        search->setName("searchButton");
-        search->setPlateAlphas({0.17, 0.26}, {0.21, 0.15});
+        toolbar = addChild<ui::Toolbar>();
+        toolbar->setDefaults(Preferences::defaultToolbar());
+        setupItems();
+    }
+
+    void setupItems()
+    {
+        items = {{"views", tr("View"), "grid", 124, [this](ui::Toolbar& owner) -> ui::View* {
+            auto* control = owner.addChild<ui::SegmentedControl>(viewNames());
+            control->setName("viewModeControl");
+            const bool labels = owner.display() == ui::Toolbar::Display::IconsAndText;
+            control->setContentHeight(labels ? 32 : 26);
+            control->setFontSize(10);
+            control->setGlyphs({"grid", "list", "view-columns", "view-gallery"}, labels);
+            control->onCurrentChanged = [](int index) { Preferences::instance().setViewMethod(kViews.at(size_t(index))); };
+            control->setCurrentIndex(viewIndex());
+            return control;
+        }}, {"group", tr("Group"), "view-group"}, {"share", tr("Share"), "share"}, {"tags", tr("Tags"), "tag"},
+                 {"action", tr("Action"), "ellipsis"}, {"search", tr("Search"), "search"},
+                 {"info", tr("Get Info"), "info"}, {"quicklook", tr("Quick Look"), "image"},
+                 {"preview", tr("Preview"), "sidebar"}, {"newfolder", tr("New Folder"), "folder"}};
+        toolbar->setItems(items);
+        syncToolbar();
+    }
+
+    void syncToolbar()
+    {
+        auto& prefs = Preferences::instance();
+        toolbar->setDisplay(static_cast<ui::Toolbar::Display>(prefs.toolbarDisplay()));
+        toolbar->setOrder(prefs.toolbarOrder());
+        for (const auto& child : toolbar->children())
+            if (auto* control = dynamic_cast<ui::SegmentedControl*>(child.get()))
+                control->setCurrentIndex(viewIndex());
     }
 
     ui::NavigationButtons* navigation;
     ui::HeaderButton* back;
     ui::HeaderButton* forward;
     PathBar* pathBar;
-    ui::HeaderButton* search;
+    ui::Toolbar* toolbar;
+    std::vector<ui::Toolbar::Item> items;
     double sidebarWidth = SideBar::kDefaultWidth;
 
 protected:
     void layout() override
     {
-        const double spacing = 1;
         double x = sidebarWidth + kNavigationStart;
         const double right = geometry().width;
         // The plate is centred on the window controls' line.
@@ -300,12 +348,60 @@ protected:
         navigation->setGeometry({x, kButtonsTopMargin + (kButtonSize - plate.height) / 2, plate.width,
                                  plate.height});
         x += plate.width + ui::window_controls::kSpacing;
-        // The end margin lines the search glyph up with the tab bar's "+" below.
         const double end = right - kHeaderEndMargin;
-        search->setGeometry({end - kButtonSize, kButtonsTopMargin, kButtonSize, kButtonSize});
-        const double pathEnd = end - kButtonSize - spacing;
-        pathBar->setGeometry({x, kButtonsTopMargin, std::max(0.0, pathEnd - x), kButtonSize});
+        const auto hint = toolbar->sizeHint();
+        const auto& order = toolbar->order();
+        const bool flexible = std::find(order.begin(), order.end(), ui::Toolbar::FlexibleSpace) != order.end();
+        const double width = flexible ? std::max(hint.width, end - x - 140) : hint.width;
+        const double toolbarX = std::max(x + 48, end - width);
+        toolbar->setGeometry({toolbarX, centeredStart(geometry().height, hint.height), std::max(0.0, end - toolbarX), hint.height});
+        pathBar->setGeometry({x + 4, kButtonsTopMargin, std::max(0.0, toolbarX - x - 10), kButtonSize});
     }
+};
+
+class ToolbarPalette : public ui::View
+{
+public:
+    explicit ToolbarPalette(HeaderRow& header)
+    {
+        setName("toolbarCustomizationPalette");
+        m_title = addChild<ui::Label>(tr("Customize Toolbar"));
+        m_title->setWeight(650);
+        m_help = addChild<ui::Label>(tr("Drag items to the toolbar or rearrange the items already there."));
+        m_help->setWrap(true);
+        for (const auto& item : header.items)
+            m_items.push_back(header.toolbar->makePaletteItem(*this, item.id, item.label, item.glyph));
+        m_items.push_back(header.toolbar->makePaletteItem(*this, ui::Toolbar::Space, tr("Space"), ""));
+        m_items.push_back(header.toolbar->makePaletteItem(*this, ui::Toolbar::FlexibleSpace, tr("Flexible Space"), ""));
+        m_default = header.toolbar->makePaletteItem(*this, ui::Toolbar::DefaultSet, tr("Default Set"), "");
+        done = addChild<ui::DialogButton>(tr("Done"));
+    }
+    ui::DialogButton* done;
+    bool acceptsPointer() const override { return true; }
+
+protected:
+    void layout() override
+    {
+        const double width = geometry().width;
+        m_title->setGeometry({18, 13, width - 36, 23});
+        m_help->setGeometry({18, 38, width - 36, 39});
+        for (size_t i = 0; i < m_items.size(); ++i) {
+            const double cell = (width - 36) / 4;
+            m_items[i]->setGeometry({18 + cell * (i % 4), 83 + 44.0 * (i / 4), cell - 5, 36});
+        }
+        m_default->setGeometry({18, geometry().height - 50, width - 132, 32});
+        done->setGeometry({width - 94, geometry().height - 50, 76, 32});
+    }
+    void paint(ui::Painter& painter) override
+    {
+        painter.drawRoundedRect(localRect(), {14}, ui::Theme::current().secondBackground, 1, style::textAlpha(0.2));
+    }
+
+private:
+    ui::Label* m_title;
+    ui::Label* m_help;
+    std::vector<ui::View*> m_items;
+    ui::View* m_default;
 };
 
 class FolderWindowRoot : public ui::View
@@ -356,6 +452,7 @@ public:
     TrashBar* trashBar;
     ui::WindowHeader* header;
     HeaderRow* row;
+    ToolbarPalette* palette = nullptr;
     bool tabsShown = false;
     bool scopeShown = false;
     bool trashShown = false;
@@ -401,6 +498,10 @@ protected:
         trashBar->setGeometry({left, y, content.width, trashShown ? kBarHeight : 0});
 
         header->setGeometry({0, 0, width, FolderWindow::kHeaderInset});
+        if (palette) {
+            const double panelWidth = std::min(540.0, width - 24);
+            palette->setGeometry({(width - panelWidth) / 2, FolderWindow::kHeaderInset + 4, panelWidth, 278});
+        }
         m_window->updateBlur();
     }
 
@@ -500,7 +601,8 @@ FolderWindow::FolderWindow(FileManagerHost* host, const FolderPage::Start& start
         if (FolderPage* page = currentPage())
             page->goForward();
     };
-    m_root->row->search->onClicked = [this] { m_pathBar->openSearch(); };
+    m_root->row->toolbar->onActivated = [this](const std::string& id, ui::PointF point) { toolbarAction(id, point); };
+    m_root->row->toolbar->onOrderChanged = [](const std::vector<std::string>& order) { Preferences::instance().setToolbarOrder(order); };
 
     m_pathBar->onItemClicked = [this](const std::string& path) {
         if (FolderPage* page = currentPage())
@@ -521,8 +623,19 @@ FolderWindow::FolderWindow(FileManagerHost* host, const FolderPage::Start& start
     };
 
     m_sidebar->onClicked = [this](const std::string& path) {
-        if (FolderPage* page = currentPage())
+        if (FolderPage* page = currentPage()) {
+            if (page->model().tagFilter() >= 0)
+                page->model().setTagFilter(-1);
             page->openUrl(path);
+        }
+    };
+    m_sidebar->onTagClicked = [this](int tag) {
+        if (auto* page = currentPage()) {
+            auto& model = page->model();
+            model.setTagFilter(model.tagFilter() == tag ? -1 : tag);
+            notify(model.tagFilter() < 0 ? tr("Showing all items")
+                    : format(tr("Showing {tag} tags in this folder"), {{"tag", tr(filetags::names[size_t(tag)])}}));
+        }
     };
     m_sidebar->onOpenInNewTab = [this](const std::string& path) { openTab(path); };
     m_sidebar->onOpenInNewWindow = [this](const std::string& path) {
@@ -583,6 +696,8 @@ void FolderWindow::retranslate()
     m_sidebar->setTitle(tr("Files"));
     m_sidebar->retranslate();
     m_pathBar->retranslate();
+    setToolbarEditing(false);
+    m_root->row->setupItems();
     m_root->scopeBar->retranslate();
     m_root->trashBar->retranslate();
     for (const Tab& tab : m_tabs)
@@ -633,6 +748,8 @@ void FolderWindow::addShortcuts()
         setCurrentTab((m_currentTab + tabCount() - 1) % std::max(1, tabCount()));
     });
     window.addShortcut(ui::ControlModifier, 'f', [this] { m_pathBar->openSearch(); });
+    for (size_t i = 0; i < kViews.size(); ++i)
+        window.addShortcut(ui::ControlModifier, '1' + i, [i] { Preferences::instance().setViewMethod(kViews[i]); });
     window.addShortcut(ui::ControlModifier, 'k', [this] { m_sidebar->connectToServer(); });
 }
 
@@ -887,6 +1004,9 @@ void FolderWindow::updateHeader()
     if (!page)
         return;
     FolderModel& model = page->model();
+    m_window->setTitle(page->folderName());
+    m_pathBar->setFolderTitle(page->folderName());
+    m_root->row->syncToolbar();
     m_back->setEnabled(model.canGoBack());
     m_forward->setEnabled(model.canGoForward());
 
@@ -925,6 +1045,177 @@ void FolderWindow::showContextMenu(ui::PointF position)
     if (!page)
         return;
     m_menu = createFolderMenu(page->model());
+    m_menu->addSeparator();
+    const auto quick = m_menu->addItem(tr("Quick Look"), [this] { if (auto* p = currentPage()) p->quickLook(); });
+    m_menu->setItemEnabled(quick, page->model().hasSelection());
+    populateViewOptions(*m_menu->addSubmenu(tr("View Options")));
+    m_menu->addItem(tr("Customize Toolbar…"), [this] { setToolbarEditing(true); });
+    m_menu->popup(m_window.get(), position);
+}
+
+static void toggleOption(ui::Menu& menu, const char* label, Preferences::Option option)
+{
+    auto& prefs = Preferences::instance();
+    const auto row = menu.addItem(tr(label), [option] {
+        auto& prefs = Preferences::instance();
+        prefs.setOption(option, !prefs.option(option));
+    });
+    menu.setItemChecked(row, prefs.option(option));
+}
+
+void FolderWindow::populateGrouping(ui::Menu& menu)
+{
+    const std::pair<const char*, int> groups[] {{trNoop("None"), Preferences::NoGroup}, {trNoop("Kind"), Preferences::KindGroup},
+        {trNoop("Name"), Preferences::NameGroup}, {trNoop("Date Modified"), Preferences::ModifiedGroup},
+        {trNoop("Date Created"), Preferences::CreatedGroup}, {trNoop("Application"), Preferences::ApplicationGroup},
+        {trNoop("Size"), Preferences::SizeGroup}, {trNoop("Tags"), Preferences::TagsGroup}};
+    for (const auto& [name, group] : groups) {
+        const auto index = menu.addItem(tr(name), [group] { Preferences::instance().setGroupBy(group); });
+        menu.setItemChecked(index, Preferences::instance().groupBy() == group);
+    }
+}
+
+void FolderWindow::populateViewOptions(ui::Menu& menu)
+{
+    auto& prefs = Preferences::instance();
+    switch (prefs.viewMethod()) {
+    case Preferences::Grid: {
+        auto* sizes = menu.addSubmenu(tr("Icon Size"));
+        for (double size : {32.0, 48.0, 64.0, 96.0, 128.0, 192.0}) {
+            const auto row = sizes->addItem(std::to_string(int(size)), [size] { Preferences::instance().setGridIconSize(size); });
+            sizes->setItemChecked(row, prefs.gridIconSize() == size);
+        }
+        menu.addItem(tr("Clean Up"), [this] {
+            if (auto* page = currentPage()) {
+                if (auto* grid = dynamic_cast<FolderGridView*>(page->view()))
+                    grid->cleanUp();
+            }
+        });
+        break;
+    }
+    case Preferences::List:
+        toggleOption(menu, trNoop("Date Modified"), Preferences::ListDate);
+        toggleOption(menu, trNoop("Size"), Preferences::ListSize);
+        toggleOption(menu, trNoop("Kind"), Preferences::ListKind);
+        toggleOption(menu, trNoop("Date Created"), Preferences::ListCreated);
+        toggleOption(menu, trNoop("Date Accessed"), Preferences::ListAccessed);
+        break;
+    case Preferences::Columns:
+        toggleOption(menu, trNoop("Show Preview Column"), Preferences::ColumnPreview);
+        toggleOption(menu, trNoop("Fit Columns to Filenames"), Preferences::ColumnFit);
+        break;
+    case Preferences::Gallery:
+        toggleOption(menu, trNoop("Show Filenames"), Preferences::GalleryNames);
+        break;
+    }
+    menu.addSeparator();
+    toggleOption(menu, trNoop("Keep Folders on Top"), Preferences::FoldersFirst);
+}
+
+void FolderWindow::populateSidebarSettings(ui::Menu& menu)
+{
+    toggleOption(menu, trNoop("Favorites"), Preferences::SidebarFavorites);
+    toggleOption(menu, trNoop("Locations"), Preferences::SidebarLocations);
+    toggleOption(menu, trNoop("Tags"), Preferences::SidebarTags);
+}
+
+void FolderWindow::setToolbarEditing(bool editing)
+{
+    auto& row = *m_root->row;
+    if (editing == bool(m_root->palette))
+        return;
+    row.toolbar->setEditing(editing);
+    if (editing) {
+        m_root->palette = m_root->addChild<ToolbarPalette>(row);
+        m_root->palette->done->onClicked = [this] { setToolbarEditing(false); };
+    } else {
+        std::shared_ptr<ui::View> old = m_root->takeChild(m_root->palette);
+        m_root->palette = nullptr;
+        base::EventLoop::current()->post([old] {});
+    }
+    m_root->requestLayout();
+}
+
+void FolderWindow::toolbarAction(const std::string& id, ui::PointF position)
+{
+    auto* page = currentPage();
+    if (!page)
+        return;
+    auto& model = page->model();
+    if (id == "search") { m_pathBar->openSearch(); return; }
+    if (id == "info") { model.openPropertiesDialog(); return; }
+    if (id == "quicklook") { page->quickLook(); return; }
+    if (id == "newfolder") { model.newFolder(); return; }
+    if (id == "preview") {
+        auto& prefs = Preferences::instance();
+        const auto preview = prefs.viewMethod() == Preferences::Columns ? Preferences::ColumnPreview : Preferences::PreviewPane;
+        prefs.setOption(preview, !prefs.option(preview));
+        return;
+    }
+    if (id == "action") { showContextMenu(position); return; }
+
+    m_menu = std::make_unique<ui::Menu>();
+    if (id == "group") {
+        populateGrouping(*m_menu);
+    } else if (id == "views") {
+        const auto names = viewNames();
+        for (size_t i = 0; i < kViews.size(); ++i) {
+            const auto row = m_menu->addItem(names[i], [i] { Preferences::instance().setViewMethod(kViews[i]); });
+            m_menu->setItemChecked(row, viewIndex() == int(i));
+        }
+    } else if (id == "tags") {
+        std::vector<std::string> paths;
+        for (const int row : model.selectedRows()) {
+            const auto file = model.item(row);
+            if (file && file->isLocalFile() && !model.isTrash() && !file->isLink)
+                paths.push_back(file->path);
+        }
+        if (paths.empty()) {
+            m_menu->setItemEnabled(m_menu->addItem(tr("Select local files or folders to tag"), [] {}), false);
+        } else {
+            uint8_t common = 0x7f;
+            for (const auto& path : paths)
+                common &= filetags::read(path);
+            for (size_t i = 0; i < filetags::names.size(); ++i) {
+                const bool checked = common & (1u << i);
+                const auto row = m_menu->addItem(tr(filetags::names[i]), [this, paths, i, checked] {
+                    bool success = true;
+                    for (const auto& path : paths)
+                        success &= filetags::set(path, int(i), !checked);
+                    if (!success)
+                        notify(tr("Some tags could not be changed. Check the file permissions and filesystem support."));
+                    if (auto* page = currentPage())
+                        page->model().setTagFilter(page->model().tagFilter());
+                });
+                m_menu->setItemChecked(row, checked);
+            }
+        }
+    } else if (id == "share") {
+        const auto rows = model.selectedRows();
+        const std::string title = rows.size() > 1 ? cutefish::i18n::trn("{n} item", "{n} items", rows.size())
+                : rows.empty() ? page->folderName() : model.displayName(rows.front());
+        m_menu->setItemEnabled(m_menu->addItem(title, [] {}), false);
+        m_menu->addSeparator();
+        auto urls = model.selectedUrls();
+        if (urls.empty())
+            urls.push_back(model.resolvedUrl());
+        m_menu->addItem(tr("Copy Location"), [urls] {
+            std::string text;
+            for (const auto& url : urls) {
+                if (!text.empty())
+                    text += '\n';
+                const auto path = base::url::toLocalFile(url);
+                text += path.value_or(url);
+            }
+            ui::Clipboard::setText(text);
+        });
+        const auto copy = m_menu->addItem(tr("Copy Files"), [this] { if (auto* p = currentPage()) p->model().copy(); });
+        m_menu->setItemEnabled(copy, !rows.empty());
+        m_menu->addSeparator();
+        m_menu->setItemEnabled(m_menu->addItem(tr("No sharing services available"), [] {}), false);
+    } else {
+        return;
+    }
     m_menu->popup(m_window.get(), position);
 }
 
@@ -1061,20 +1352,55 @@ void FolderWindow::buildMainMenu()
     edit->onAboutToShow = prepare;
 
     ui::Menu* view = m_mainMenu->addSubmenu(tr("View"));
-    const size_t icons = view->addItem(tr("as Icons"), [] { Preferences::instance().setViewMethod(Preferences::Grid); });
-    const size_t list = view->addItem(tr("as List"), [] { Preferences::instance().setViewMethod(Preferences::List); });
+    const auto names = viewNames();
+    std::array<size_t, 4> viewRows {};
+    for (size_t i = 0; i < kViews.size(); ++i) {
+        viewRows[i] = view->addItem(names[i], [i] { Preferences::instance().setViewMethod(kViews[i]); });
+        view->setItemKeyEquivalent(viewRows[i], std::to_string(i + 1), control);
+    }
     view->addSeparator();
     ui::Menu* sort = view->addSubmenu(tr("Sort By"));
+    ui::Menu* group = view->addSubmenu(tr("Group By"));
+    group->onAboutToShow = [this, group] { group->clear(); populateGrouping(*group); };
+    ui::Menu* options = view->addSubmenu(tr("View Options"));
+    options->onAboutToShow = [this, options] { options->clear(); populateViewOptions(*options); };
+    ui::Menu* sidebar = view->addSubmenu(tr("Sidebar Settings"));
+    sidebar->onAboutToShow = [this, sidebar] { sidebar->clear(); populateSidebarSettings(*sidebar); };
+    ui::Menu* toolbar = view->addSubmenu(tr("Toolbar"));
+    toolbar->onAboutToShow = [this, toolbar] {
+        toolbar->clear();
+        const char* displays[] {trNoop("Icon Only"), trNoop("Icon and Text"), trNoop("Text Only")};
+        for (int i = 0; i < 3; ++i) {
+            const auto row = toolbar->addItem(tr(displays[i]), [i] { Preferences::instance().setToolbarDisplay(i); });
+            toolbar->setItemChecked(row, Preferences::instance().toolbarDisplay() == i);
+        }
+        toolbar->addSeparator();
+        toolbar->addItem(tr("Customize Toolbar…"), [this] { setToolbarEditing(true); });
+        toolbar->addItem(tr("Restore Default Set"), [] { Preferences::instance().setToolbarOrder(Preferences::defaultToolbar()); });
+    };
+    const auto addToggle = [&](const char* show, const char* hide, Preferences::Option option) {
+        return view->addItem(tr(Preferences::instance().option(option) ? hide : show), [option] {
+            auto& prefs = Preferences::instance();
+            prefs.setOption(option, !prefs.option(option));
+        });
+    };
+    const auto path = addToggle(trNoop("Show Path Bar"), trNoop("Hide Path Bar"), Preferences::PathBar);
+    const auto status = addToggle(trNoop("Show Status Bar"), trNoop("Hide Status Bar"), Preferences::StatusBar);
+    const auto preview = view->addItem(tr("Show Preview"), [this] { toolbarAction("preview", {}); });
     view->addSeparator();
     const size_t hidden = addAction(view, "showHidden");
     view->addSeparator();
     const size_t refresh = view->addItem(tr("Refresh"), onPage([](FolderPage& page) { page.model().refresh(); }));
     view->setItemKeyEquivalent(refresh, "F5", 0);
-    view->onAboutToShow = [prepare, view, icons, list, hidden] {
+    view->onAboutToShow = [prepare, view, viewRows, hidden, path, status, preview] {
         prepare();
         const Preferences& preferences = Preferences::instance();
-        view->setItemChecked(icons, preferences.viewMethod() == Preferences::Grid);
-        view->setItemChecked(list, preferences.viewMethod() == Preferences::List);
+        for (size_t i = 0; i < viewRows.size(); ++i)
+            view->setItemChecked(viewRows[i], viewIndex() == int(i));
+        view->setItemText(path, preferences.option(Preferences::PathBar) ? tr("Hide Path Bar") : tr("Show Path Bar"));
+        view->setItemText(status, preferences.option(Preferences::StatusBar) ? tr("Hide Status Bar") : tr("Show Status Bar"));
+        const auto pane = preferences.viewMethod() == Preferences::Columns ? Preferences::ColumnPreview : Preferences::PreviewPane;
+        view->setItemText(preview, preferences.option(pane) ? tr("Hide Preview") : tr("Show Preview"));
         if (ui::commandKeys())
             view->setItemKeyEquivalent(hidden, ".", ui::ControlModifier | ui::ShiftModifier);
         else
@@ -1103,6 +1429,18 @@ void FolderWindow::buildMainMenu()
         if (!trash)
             sortItem(tr("Type"), Preferences::Type);
         sortItem(tr("Size"), Preferences::Size);
+        if (!trash) {
+            sortItem(tr("Date Created"), Preferences::CreatedTime);
+            sortItem(tr("Date Accessed"), Preferences::AccessedTime);
+        }
+        sort->addSeparator();
+        const bool descending = trash ? preferences.trashSortDesc() : preferences.sortDesc();
+        const auto reverse = sort->addItem(tr("Descending"), [trash, sortMode, descending] {
+            auto& prefs = Preferences::instance();
+            if (trash) prefs.setTrashSort(sortMode, !descending);
+            else prefs.setSort(sortMode, !descending);
+        });
+        sort->setItemChecked(reverse, descending);
     };
 
     ui::Menu* go = m_mainMenu->addSubmenu(tr("Go"));

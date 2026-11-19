@@ -397,6 +397,12 @@ PathBar::PathBar()
     m_editor = editor;
     m_editor->setName("pathEditor");
     m_editor->setFrameVisible(false);
+    m_title = addChild<ui::Label>();
+    m_title->setWeight(650);
+    m_title->setFontSize(15);
+    m_title->setElide(ui::Label::Elide::Middle);
+    m_title->setVerticallyCentered(true);
+    m_title->setVisible(false);
     m_editor->setPlaceholder(tr("Search or Enter Path"));
     m_editor->setSelectByMouse(true);
     m_editor->setVisible(false);
@@ -500,11 +506,19 @@ void PathBar::retranslate()
     m_editor->setPlaceholder(tr("Search or Enter Path"));
 }
 
+void PathBar::setFolderTitle(std::string title)
+{
+    m_titleMode = true;
+    m_title->setText(std::move(title));
+    updateVisibility();
+}
+
 void PathBar::updateVisibility()
 {
     const bool editorShown = m_editing || searching();
     m_editor->setVisible(editorShown);
-    m_crumbs->setVisible(!editorShown);
+    m_crumbs->setVisible(!editorShown && !m_titleMode);
+    m_title->setVisible(!editorShown && m_titleMode);
     m_clear->setVisible(editorShown && searching());
     requestLayout();
     requestPaint();
@@ -580,6 +594,7 @@ void PathBar::layout()
     const ui::Theme& theme = ui::Theme::current();
     const ui::RectF rect = localRect();
     m_crumbs->setGeometry(rect);
+    m_title->setGeometry(rect);
 
     // Lower than the header buttons, centred on them.
     const double height = 28;

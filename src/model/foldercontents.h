@@ -30,6 +30,8 @@ struct SortQuery
     int column = 0;
     bool descending = false;
     bool directoriesFirst = true;
+    int group = 0;
+    int tag = -1;
 };
 
 // What one update of the rows did, for views that keep state per file.
@@ -65,6 +67,12 @@ public:
 
     int count() const { return int(m_items.size()); }
     const FileItemList& items() const { return m_items; }
+    const std::vector<std::pair<int, std::string>>& sections() const { return m_sections; }
+    int depth(int row) const { return row >= 0 && size_t(row) < m_depths.size() ? m_depths[size_t(row)] : 0; }
+    bool isExpanded(const std::string& url) const { return m_expanded.contains(url); }
+    void toggleExpansion(const std::string& url, bool showHidden);
+    void collapseAll();
+    void setTreeHidden(bool show);
     // Null past the end.
     FileItemPtr item(int row) const;
     int rowForUrl(const std::string& url) const;
@@ -93,14 +101,21 @@ public:
 
 private:
     struct Prepared;
+    struct Branch;
 
     bool isSettled() const;
     void prepare();
     void publish(std::shared_ptr<Prepared> prepared);
+    void publishTree(const ContentsChange& baseChange = {});
 
     DirectoryLister* m_lister = nullptr;
     base::Subscription m_itemsChanged;
     FileItemList m_items;
+    std::vector<std::pair<int, std::string>> m_sections;
+    FileItemList m_baseItems;
+    std::vector<std::pair<int, std::string>> m_baseSections;
+    std::unordered_map<std::string, std::unique_ptr<Branch>> m_expanded;
+    std::vector<int> m_depths;
     std::unordered_map<std::string, int> m_rows;
     std::map<std::string, std::string> m_renames;
     SortQuery m_query;

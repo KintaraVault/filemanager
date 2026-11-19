@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/preferences.h"
+#include "base/hash.h"
 #include "core/config.h"
 
 #include "base/paths.h"
@@ -23,7 +24,11 @@ Preferences::Preferences(const std::string& path)
     : m_settings(std::make_unique<base::Settings>(path))
 {
     base::Settings& s = *m_settings;
-    m_viewMethod = int(s.intValue("viewMethod", m_viewMethod));
+    m_viewMethod = std::clamp(int(s.intValue("viewMethod", m_viewMethod)), int(List), int(Gallery));
+    m_groupBy = std::clamp(int(s.intValue("groupBy", m_groupBy)), int(NoGroup), int(TagsGroup));
+    m_options = unsigned(s.intValue("browserOptions", m_options));
+    m_toolbarDisplay = std::clamp(int(s.intValue("toolbarDisplay", m_toolbarDisplay)), 0, 2);
+    m_toolbarOrder = s.stringListValue("toolbarOrder", defaultToolbar());
     m_sortMode = int(s.intValue("sortMode", m_sortMode));
     m_sortDesc = s.boolValue("sortDesc", m_sortDesc);
     m_trashSortMode = int(s.intValue("trashSortMode", m_trashSortMode));
@@ -44,6 +49,25 @@ Preferences::Preferences(const std::string& path)
 
 Preferences::~Preferences() = default;
 
+static std::string iconPositionsKey(const std::string& url)
+{
+    return "IconPositions/" + base::CryptographicHash::hashHex(url, base::CryptographicHash::Algorithm::Sha256);
+}
+
+std::vector<std::string> Preferences::iconPositions(const std::string& url) const
+{
+    return m_settings->stringListValue(iconPositionsKey(url));
+}
+
+void Preferences::setIconPositions(const std::string& url, const std::vector<std::string>& positions)
+{
+    if (m_readOnly)
+        return;
+    const auto key = iconPositionsKey(url);
+    m_settings->setValue(key, positions);
+    m_settings->sync();
+}
+
 void Preferences::save()
 {
     if (m_readOnly) {
@@ -52,6 +76,10 @@ void Preferences::save()
     }
     base::Settings& s = *m_settings;
     s.setValue("viewMethod", m_viewMethod);
+    s.setValue("groupBy", m_groupBy);
+    s.setValue("browserOptions", int(m_options));
+    s.setValue("toolbarDisplay", m_toolbarDisplay);
+    s.setValue("toolbarOrder", m_toolbarOrder);
     s.setValue("sortMode", m_sortMode);
     s.setValue("sortDesc", m_sortDesc);
     s.setValue("trashSortMode", m_trashSortMode);
@@ -79,9 +107,47 @@ void Preferences::setShowHiddenFiles(bool show)
 
 void Preferences::setViewMethod(int method)
 {
-    if (m_viewMethod == method)
+    if (method < List || method > Gallery || m_viewMethod == method)
         return;
     m_viewMethod = method;
+    save();
+}
+
+const std::vector<std::string>& Preferences::defaultToolbar()
+{
+    static const std::vector<std::string> order {"views", "group", "share", "tags", "action", "search"};
+    return order;
+}
+
+void Preferences::setGroupBy(int group)
+{
+    if (group < NoGroup || group > TagsGroup || group == m_groupBy)
+        return;
+    m_groupBy = group;
+    save();
+}
+
+void Preferences::setOption(Option key, bool enabled)
+{
+    if (option(key) == enabled)
+        return;
+    m_options ^= (1u << key);
+    save();
+}
+
+void Preferences::setToolbarDisplay(int display)
+{
+    if (display < 0 || display > 2 || display == m_toolbarDisplay)
+        return;
+    m_toolbarDisplay = display;
+    save();
+}
+
+void Preferences::setToolbarOrder(std::vector<std::string> order)
+{
+    if (order == m_toolbarOrder)
+        return;
+    m_toolbarOrder = std::move(order);
     save();
 }
 
