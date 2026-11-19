@@ -258,7 +258,7 @@ public:
         m_name->setFontSize(11);
     }
 
-    void bind(FileItemPtr item, bool thumbnail, std::string name, bool selected)
+    void bind(FileItemPtr item, bool thumbnail, std::string name, bool selected, bool showName)
     {
         if (m_item != item) {
             m_item = item;
@@ -268,7 +268,7 @@ public:
         }
         m_name->setText(std::move(name));
         m_name->setColor(selected ? style::selectedTextColor() : ui::Theme::current().text);
-        m_name->setVisible(Preferences::instance().option(Preferences::GalleryNames));
+        m_name->setVisible(showName);
         m_selected = selected;
         requestPaint();
     }
@@ -359,6 +359,7 @@ void Filmstrip::forEachItemView(const std::function<void(int, ui::View*)>& visit
 
 void Filmstrip::updateItems()
 {
+    const auto options = Preferences::instance().viewOptions(model().resolvedUrl(), Preferences::Gallery);
     const int count = model().count();
     const double x = scrollPosition().x - kTileMargin;
     const int first = std::clamp(int(std::floor(x / kTileWidth)), 0, count);
@@ -381,7 +382,8 @@ void Filmstrip::updateItems()
             tile->setVisible(true);
         }
         tile->setGeometry(*dragRect(row));
-        tile->bind(model().item(row), model().showsThumbnail(row), model().displayName(row), model().isSelected(row));
+        tile->bind(model().item(row), model().showsThumbnail(row), model().displayName(row), model().isSelected(row),
+                   options.option(Preferences::GalleryNames));
         tile->setVisible(!isRenaming() || currentIndex() != row);
     }
 }
@@ -449,7 +451,8 @@ public:
 
     double width(const FolderModel& model) const
     {
-        if (!Preferences::instance().option(Preferences::ColumnFit))
+        const auto options = Preferences::instance().viewOptions(model.resolvedUrl(), Preferences::Columns);
+        if (!options.option(Preferences::ColumnFit))
             return 218;
         double width = 218;
         // Measure a bounded sample so a large network folder never blocks layout.
@@ -570,10 +573,11 @@ void ColumnBrowser::updatePath(bool resetAnchor)
             m_chain->ancestors.push_back({url, model, view});
         }
         auto& model = *m_chain->ancestors[depth++].model;
-        model.setSortMode(prefs.sortMode());
-        model.setSortDesc(prefs.sortDesc());
+        const auto options = prefs.viewOptions(url, Preferences::Columns);
+        model.setSortMode(options.sort);
+        model.setSortDesc(options.descending);
         model.setSortDirsFirst(prefs.option(Preferences::FoldersFirst));
-        model.setGroupBy(prefs.groupBy());
+        model.setGroupBy(options.group);
         if (model.selectedUrls() != std::vector<std::string>{child}) {
             model.clearSelection();
             model.selectUrlsWhenListed({child});
@@ -589,7 +593,8 @@ void ColumnBrowser::updatePreview()
 {
     const auto rows = m_model.selectedRows();
     const auto item = rows.size() == 1 ? m_model.item(rows.front()) : nullptr;
-    const bool showing = item && !item->isDir && Preferences::instance().option(Preferences::ColumnPreview);
+    const auto options = Preferences::instance().viewOptions(m_model.resolvedUrl(), Preferences::Columns);
+    const bool showing = item && !item->isDir && options.option(Preferences::ColumnPreview);
     if (showing != m_preview->isVisible())
         m_reveal = true;
     m_preview->setVisible(showing);

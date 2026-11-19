@@ -8,6 +8,8 @@
 #include "base/signal.h"
 
 #include <memory>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,6 +33,7 @@ public:
 
     // Sort columns, the directory model's.
     enum SortColumn {
+        Manual = -1,
         Name = 0,
         Size = 1,
         ModifiedTime = 2,
@@ -44,7 +47,24 @@ public:
     enum GroupBy { NoGroup, KindGroup, NameGroup, ModifiedGroup, CreatedGroup, ApplicationGroup, SizeGroup, TagsGroup };
     enum Option { PathBar, StatusBar, PreviewPane, ColumnPreview, ColumnFit, FoldersFirst,
                   ListDate, ListSize, ListKind, ListCreated, ListAccessed, GalleryNames,
-                  SidebarFavorites, SidebarLocations, SidebarTags };
+                  SidebarFavorites, SidebarLocations, SidebarTags, IconRight, IconInfo,
+                  IconPreview, ListPreview, ColumnIcons, ColumnIconPreview, ListLargeIcons, ListRelativeDates };
+
+    struct ViewOptions {
+        unsigned flags = 0;
+        int sort = Name;
+        int group = NoGroup;
+        bool descending = false;
+        double iconSize = 64;
+        int spacing = 10;
+        int textSize = 13;
+        // Empty for the theme, #RRGGBB for a color, or a local image path.
+        std::string background;
+
+        bool option(Option key) const { return flags & (1u << key); }
+        void setOption(Option key, bool on) { flags = (flags & ~(1u << key)) | (unsigned(on) << key); }
+        bool operator==(const ViewOptions&) const = default;
+    };
 
     static Preferences& instance();
     // For tests: another file.
@@ -55,6 +75,12 @@ public:
     void setViewMethod(int method);
     int groupBy() const { return m_groupBy; }
     void setGroupBy(int group);
+    ViewOptions viewOptions(const std::string& url, int mode) const;
+    void setViewOptions(const std::string& url, int mode, const ViewOptions& options);
+    void useViewDefaults(const std::string& url, int mode);
+    int pinnedView(const std::string& url) const;
+    bool browseInPinnedView(const std::string& url) const;
+    void setPinnedView(const std::string& url, int mode, bool browse);
     bool option(Option key) const { return m_options & (1u << key); }
     void setOption(Option key, bool enabled);
     int toolbarDisplay() const { return m_toolbarDisplay; }
@@ -103,6 +129,8 @@ public:
 
 private:
     void save();
+    std::optional<ViewOptions> storedViewOptions(const std::string& key) const;
+    void storeViewOptions(const std::string& key, const ViewOptions& options);
 
     std::unique_ptr<base::Settings> m_settings;
     bool m_readOnly = false;
@@ -125,6 +153,8 @@ private:
     double m_gridIconSize = 64;
     double m_sidebarWidth = 190;
     bool m_showHiddenFiles = false;
+    mutable std::map<std::string, std::optional<ViewOptions>> m_viewOptions;
+    mutable std::map<std::string, std::pair<int, bool>> m_pinnedViews;
 };
 
 } // namespace fm

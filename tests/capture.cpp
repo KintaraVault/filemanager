@@ -106,6 +106,7 @@ int main(int argc, char** argv)
     bool lateWorkArea = false;
     bool inspector = false;
     bool palette = false;
+    bool options = false;
     std::string appearance;
     std::string branch;
     std::vector<std::string> select;
@@ -125,6 +126,8 @@ int main(int argc, char** argv)
             inspector = true;
         else if (argument == "palette")
             palette = true;
+        else if (argument == "options")
+            options = true;
         else if (argument.starts_with("appearance="))
             appearance = argument.substr(11);
         else if (argument.starts_with("branch="))
@@ -175,6 +178,14 @@ int main(int argc, char** argv)
     }
     if (palette)
         window.setToolbarEditing(true);
+    if (options) {
+        window.toggleViewOptions();
+        auto* panel = window.viewOptionsWindow();
+        if (!panel) return 1;
+        panel->setScale(scale);
+        std::ofstream(output + ".txt") << panel->layoutDump();
+        return panel->grab().savePng(output) ? 0 : 1;
+    }
 
     // A headless window lays out only when grabbed; what it asks for then
     // (thumbnails, folder sizes) arrives from workers.

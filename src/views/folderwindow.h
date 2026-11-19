@@ -72,6 +72,8 @@ public:
     void show();
     void close();
     void setToolbarEditing(bool editing);
+    void toggleViewOptions();
+    ui::Window* viewOptionsWindow() const;
 
     // FolderModelHost.
     void openFolders(const std::vector<std::string>& paths) override;
@@ -109,7 +111,6 @@ private:
     void updateTabBar();
     void showContextMenu(ui::PointF position);
     void toolbarAction(const std::string& id, ui::PointF position);
-    void populateViewOptions(ui::Menu& menu);
     void populateGrouping(ui::Menu& menu);
     void populateSidebarSettings(ui::Menu& menu);
     // The menus the menu bar shows while the window is active.
@@ -117,6 +118,7 @@ private:
     void showAbout();
     double headerHeight() const;
     void addShortcuts();
+    void selectView(int mode);
 
     FileManagerHost* m_host;
     // The window shows it until the window goes, so it outlives the window.
@@ -140,6 +142,7 @@ private:
     bool m_closed = false;
     std::unique_ptr<ui::Menu> m_menu;
     std::unique_ptr<class FramelessDialog> m_folderAppearance;
+    std::unique_ptr<class ViewOptionsDialog> m_viewOptions;
     std::unique_ptr<ui::Toast> m_toast;
     std::unique_ptr<ui::AboutDialog> m_aboutDialog;
     std::unique_ptr<class ArchivePasswordPrompt> m_archivePassword;

@@ -359,7 +359,7 @@ public:
         const bool nextSelected = selected && index + 1 < model.count() && model.isSelected(index + 1) && !sectionAt(index + 1);
         const bool dropTarget = m_list->isDropTarget(index);
         const bool dropAllowed = dropTarget && m_list->dropAllowed();
-        const bool thumbnail = model.showsThumbnail(index);
+        const bool thumbnail = c.showIcons && c.iconPreview && model.showsThumbnail(index);
         const auto tags = item->isLocalFile() && !item->isLink ? filetags::read(item->path) : 0;
         // What the row's own layout and paint go by; its child views ask for theirs.
         const bool changed = index != m_index || item != m_item || selected != m_selected
@@ -392,7 +392,7 @@ public:
         if (icon != m_icon->name())
             m_icon->setName(icon);
         m_icon->setFolderPath(item->isDir && !item->isLink && item->isLocalFile() ? item->path : std::string());
-        m_emblem->setVisible(item->isLink);
+        m_emblem->setVisible(c.showIcons && item->isLink);
         m_name->setText(model.displayName(index));
         if (m_list->hasDisclosure()) {
             const bool folder = item->isDir && !item->isLink && item->isLocalFile() && !model.isSearching();
@@ -404,19 +404,23 @@ public:
         m_name->setColor(primary);
         m_name->setOpacity(textOpacity);
         m_name->setVisible(m_list->renamingIndex() != index);
+        if (c.textSize > 0)
+            m_name->setFontSize(c.textSize);
 
         const std::string texts[] = {
             c.showOrigin() ? model.originalPathText(index) : std::string(),
             c.showSize() ? model.fileSizeText(index) : std::string(),
             c.showType() ? model.fileTypeText(index) : std::string(),
-            c.showDate() ? (c.trash ? model.deletedDateText(index) : model.modifiedDateText(index)) : std::string(),
-            c.created ? dates::columnTime(item->created) : std::string(),
-            c.accessed ? dates::columnTime(item->accessed) : std::string(),
+            c.showDate() ? (c.trash ? model.deletedDateText(index) : dates::columnTime(item->modified, c.relativeDates)) : std::string(),
+            c.created ? dates::columnTime(item->created, c.relativeDates) : std::string(),
+            c.accessed ? dates::columnTime(item->accessed, c.relativeDates) : std::string(),
         };
         for (int i = 0; i < 6; ++i) {
             m_columns[i]->setText(texts[i]);
             m_columns[i]->setColor(secondary);
             m_columns[i]->setOpacity(textOpacity);
+            if (c.textSize > 0)
+                m_columns[i]->setFontSize(c.textSize);
         }
         if (!changed)
             return;
@@ -431,7 +435,7 @@ protected:
     {
         const ListColumns& c = m_list->columns();
         const double height = geometry().height;
-        const double size = ListColumns::iconSize;
+        const double size = c.rowIconSize;
         const double indent = m_list->hasDisclosure() ? 18 + std::min(12, m_list->model().contents().depth(m_index)) * 14 : 0;
         const ui::RectF icon {c.cellPadding + indent, centeredStart(height, size), size, size};
         m_disclosure->setGeometry({icon.x - 19, centeredStart(height, 16), 16, 16});
@@ -443,10 +447,10 @@ protected:
         const double iconOpacity = m_item && m_item->isHidden ? 0.5 : 1.0;
         m_icon->setOpacity(iconOpacity);
         layoutThumbnail(icon, scale);
-        m_icon->setVisible(!m_thumbnail->isVisible());
+        m_icon->setVisible(c.showIcons && !m_thumbnail->isVisible());
         m_emblem->setGeometry({icon.x + icon.width - 12 + 2, icon.y + icon.height - 12 + 2, 12, 12});
 
-        const double nameX = icon.x + size + kSmallSpacing + 2;
+        const double nameX = icon.x + (c.showIcons ? size + kSmallSpacing + 2 : 0);
         const bool branch = c.compact && m_item && m_item->isDir;
         m_branch->setVisible(branch);
         m_branch->setGeometry({geometry().width - 15, centeredStart(height, 12), 12, 12});
@@ -673,16 +677,27 @@ double FolderListView::headerHeight() const
     return topInset() + (m_columns.compact ? 0 : ListColumns::headerHeight());
 }
 
+double FolderListView::rowHeight() const
+{
+    return std::max({ListColumns::rowHeight(), m_columns.rowIconSize + 4.0, m_columns.textSize * 1.35 + 6});
+}
+
 void FolderListView::sortBy(int mode)
 {
     Preferences& preferences = Preferences::instance();
     const bool trash = m_columns.trash;
-    const int current = trash ? preferences.trashSortMode() : preferences.sortMode();
-    const bool currentDesc = trash ? preferences.trashSortDesc() : preferences.sortDesc();
+    const int current = model().sortMode();
+    const bool currentDesc = model().sortDesc();
     // Newest first is the useful default for dates.
     const bool descending = current == mode ? !currentDesc : mode == m_columns.dateSortMode();
     if (trash)
         preferences.setTrashSort(mode, descending);
+    else if (m_browser) {
+        auto options = preferences.viewOptions(model().resolvedUrl(), Preferences::List);
+        options.sort = mode;
+        options.descending = descending;
+        preferences.setViewOptions(model().resolvedUrl(), Preferences::List, options);
+    }
     else
         preferences.setSort(mode, descending);
 }
@@ -715,8 +730,19 @@ void FolderListView::setColumnWidth(int column, double width, bool save)
 void FolderListView::layout()
 {
     m_columns.trash = model().isTrash();
-    m_columns.created = !m_columns.compact && !m_columns.trash && Preferences::instance().option(Preferences::ListCreated);
-    m_columns.accessed = !m_columns.compact && !m_columns.trash && Preferences::instance().option(Preferences::ListAccessed);
+    if (m_browser || m_columns.compact) {
+        const auto options = Preferences::instance().viewOptions(model().resolvedUrl(), m_columns.compact ? Preferences::Columns : Preferences::List);
+        m_columns.date = options.option(Preferences::ListDate);
+        m_columns.size = options.option(Preferences::ListSize);
+        m_columns.kind = options.option(Preferences::ListKind);
+        m_columns.created = !m_columns.compact && !m_columns.trash && options.option(Preferences::ListCreated);
+        m_columns.accessed = !m_columns.compact && !m_columns.trash && options.option(Preferences::ListAccessed);
+        m_columns.textSize = options.textSize;
+        m_columns.showIcons = !m_columns.compact || options.option(Preferences::ColumnIcons);
+        m_columns.iconPreview = options.option(m_columns.compact ? Preferences::ColumnIconPreview : Preferences::ListPreview);
+        m_columns.rowIconSize = m_columns.compact ? 20 : options.option(Preferences::ListLargeIcons) ? 30 : 18;
+        m_columns.relativeDates = options.option(Preferences::ListRelativeDates);
+    }
     m_columns.availableWidth = std::max(0.0, geometry().width - leftMargin() - rightMargin());
     if (!m_columns.compact && m_browser)
         m_columns.availableWidth = std::max(m_columns.availableWidth, ListColumns::minimumNameWidth
@@ -739,7 +765,7 @@ void FolderListView::layout()
 double FolderListView::minimumContentHeight() const
 {
     return std::max(geometry().height,
-                    topMargin() + model().count() * ListColumns::rowHeight() + bottomMargin()
+                    topMargin() + model().count() * rowHeight() + bottomMargin()
                             + model().contents().sections().size() * kSectionHeight);
 }
 
@@ -756,7 +782,7 @@ int FolderListView::nextRowAt(double y) const
     int high = model().count();
     while (low < high) {
         const int mid = low + (high - low) / 2;
-        if (rowRect(mid).y + ListColumns::rowHeight() <= y)
+        if (rowRect(mid).y + rowHeight() <= y)
             low = mid + 1;
         else
             high = mid;
@@ -781,8 +807,8 @@ void FolderListView::positionChanged()
 
 ui::RectF FolderListView::rowRect(int index) const
 {
-    return {leftMargin(), topMargin() + index * ListColumns::rowHeight() + sectionCountBefore(index) * kSectionHeight, m_columns.availableWidth,
-            ListColumns::rowHeight()};
+    return {leftMargin(), topMargin() + index * rowHeight() + sectionCountBefore(index) * kSectionHeight, m_columns.availableWidth,
+            rowHeight()};
 }
 
 int FolderListView::indexAt(ui::PointF content) const
@@ -871,7 +897,7 @@ bool FolderListView::navigate(const ui::KeyEvent& event)
             return true;
         }
     }
-    const double rowHeight = ListColumns::rowHeight();
+    const double rowHeight = this->rowHeight();
     const int page = std::max(1, int(std::floor((geometry().height - headerHeight()) / rowHeight)) - 1);
     switch (event.key) {
     case ui::key::Home:

@@ -1408,3 +1408,132 @@ msgstr "Выберите локальные файлы или папки, что
 #: src/views/folderwindow.cpp
 msgid "Some tags could not be changed. Check the file permissions and filesystem support."
 msgstr "Не удалось изменить некоторые теги. Проверьте права доступа и поддержку тегов файловой системой."
+
+#: src/views/folderwindow.cpp
+msgid "Show View Options"
+msgstr "Показать параметры вида"
+
+#: src/views/folderwindow.cpp
+msgid "Hide View Options"
+msgstr "Скрыть параметры вида"
+
+#: src/dialogs/viewoptionsdialog.cpp
+msgid "View Options"
+msgstr "Параметры вида"
+
+msgid "Clean Up"
+msgstr "Выровнять значки"
+
+msgid "Keep Folders on Top"
+msgstr "Показывать папки первыми"
+
+msgid "Always open in list view"
+msgstr "Всегда открывать списком"
+
+msgid "Always open in icon view"
+msgstr "Всегда открывать значками"
+
+msgid "Always open in column view"
+msgstr "Всегда открывать колонками"
+
+msgid "Always open in gallery view"
+msgstr "Всегда открывать галереей"
+
+msgid "Browse in list view"
+msgstr "Просматривать списком"
+
+msgid "Browse in icon view"
+msgstr "Просматривать значками"
+
+msgid "Browse in column view"
+msgstr "Просматривать колонками"
+
+msgid "Browse in gallery view"
+msgstr "Просматривать галереей"
+
+msgid "Group By:"
+msgstr "Группировка:"
+
+msgid "Sort By:"
+msgstr "Сортировка:"
+
+msgid "None"
+msgstr "Нет"
+
+msgid "Icon size:"
+msgstr "Размер значков:"
+
+msgid "Grid spacing:"
+msgstr "Шаг сетки:"
+
+msgid "Text size:"
+msgstr "Размер текста:"
+
+msgid "Label position:"
+msgstr "Расположение подписей:"
+
+msgid "Bottom"
+msgstr "Снизу"
+
+msgid "Right"
+msgstr "Справа"
+
+msgid "Show item info"
+msgstr "Показывать сведения об объектах"
+
+msgid "Show icon preview"
+msgstr "Показывать миниатюры"
+
+msgid "Background:"
+msgstr "Фон:"
+
+msgid "Default"
+msgstr "По умолчанию"
+
+msgid "Color"
+msgstr "Цвет"
+
+msgid "Picture"
+msgstr "Изображение"
+
+msgid "Choose…"
+msgstr "Выбрать…"
+
+msgid "Choose Background Picture"
+msgstr "Выбрать фоновое изображение"
+
+msgid "Images"
+msgstr "Изображения"
+
+msgid "Small"
+msgstr "Маленькие"
+
+msgid "Large"
+msgstr "Большие"
+
+msgid "Show Columns:"
+msgstr "Показывать столбцы:"
+
+msgid "Date Created"
+msgstr "Дата создания"
+
+msgid "Date Accessed"
+msgstr "Дата доступа"
+
+msgid "Use relative dates"
+msgstr "Показывать относительные даты"
+
+msgid "Show icons"
+msgstr "Показывать значки"
+
+msgid "Show preview column"
+msgstr "Показывать колонку предпросмотра"
+
+msgid "Resize columns to fit filenames"
+msgstr "Подбирать ширину колонок по именам"
+
+msgid "Show Filenames"
+msgstr "Показывать имена файлов"
+
+msgid "Use as Defaults"
+msgstr "Использовать по умолчанию"

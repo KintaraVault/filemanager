@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/common.h"
+#include "core/preferences.h"
 
 #include "base/signal.h"
 #include "ui/view.h"
@@ -15,6 +16,7 @@
 
 namespace cutefish::ui {
 class HeaderBackdrop;
+class ImageView;
 class Label;
 }
 
@@ -46,6 +48,10 @@ public:
     FolderModel& model() const { return *m_model; }
     FolderView* view() const { return m_view; }
     std::string currentUrl() const;
+    int viewMethod() const { return m_viewMethod; }
+    void chooseView(int mode);
+    Preferences::ViewOptions viewOptions() const;
+    void setViewOptions(const Preferences::ViewOptions& options);
     std::string folderName() const;
     // "Searching “…”" while searching, else the folder's name.
     std::string tabTitle() const;
@@ -74,7 +80,9 @@ protected:
     void paint(ui::Painter& painter) override;
 
 private:
-    void createView();
+    void createView(int mode);
+    void applySort();
+    int locationView() const;
     void updateDetails();
     void restoreViewPosition(bool complete);
     bool handleKey(const ui::KeyEvent& event);
@@ -90,8 +98,12 @@ private:
     ui::Label* m_noResults;
     class SearchPathStrip* m_pathStrip = nullptr;
     ui::Label* m_status;
+    ui::ImageView* m_backgroundImage;
+    std::optional<ui::Color> m_backgroundColor;
+    ui::RectF m_backgroundBox;
     double m_headerHeight = 0;
     int m_viewMethod = -1;
+    int m_lastDefaultMode = -1;
     double m_pendingViewPosition = NAN;
     std::vector<base::Subscription> m_subscriptions;
 };

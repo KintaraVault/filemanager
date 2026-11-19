@@ -9,6 +9,7 @@
 #include "base/settings.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace fm {
 
@@ -52,6 +53,115 @@ Preferences::~Preferences() = default;
 static std::string iconPositionsKey(const std::string& url)
 {
     return "IconPositions/" + base::CryptographicHash::hashHex(url, base::CryptographicHash::Algorithm::Sha256);
+}
+
+static std::string viewOptionsKey(const std::string& url, int mode)
+{
+    return "ViewOptions/" + std::to_string(mode) + "/" + (url.empty() ? "default" :
+            base::CryptographicHash::hashHex(url, base::CryptographicHash::Algorithm::Sha256));
+}
+
+std::optional<Preferences::ViewOptions> Preferences::storedViewOptions(const std::string& key) const
+{
+    if (const auto it = m_viewOptions.find(key); it != m_viewOptions.end())
+        return it->second;
+    const auto flags = m_settings->intValue(key + ".flags", -1);
+    std::optional<ViewOptions> result;
+    if (flags >= 0) {
+        auto& value = result.emplace();
+        value.flags = unsigned(flags);
+        value.sort = std::clamp(int(m_settings->intValue(key + ".sort", Name)), int(Manual), int(AccessedTime));
+        value.group = std::clamp(int(m_settings->intValue(key + ".group", NoGroup)), int(NoGroup), int(TagsGroup));
+        value.descending = m_settings->boolValue(key + ".descending", false);
+        const auto size = m_settings->doubleValue(key + ".iconSize", 64);
+        value.iconSize = std::isfinite(size) ? std::clamp(size, 22.0, 256.0) : 64;
+        value.spacing = std::clamp(int(m_settings->intValue(key + ".spacing", 10)), 4, 42);
+        value.textSize = std::clamp(int(m_settings->intValue(key + ".textSize", 13)), 10, 18);
+        value.background = m_settings->stringValue(key + ".background");
+    }
+    return m_viewOptions.emplace(key, std::move(result)).first->second;
+}
+
+Preferences::ViewOptions Preferences::viewOptions(const std::string& url, int mode) const
+{
+    if (!url.empty()) {
+        if (const auto options = storedViewOptions(viewOptionsKey(url, mode)))
+            return *options;
+    }
+    if (const auto options = storedViewOptions(viewOptionsKey({}, mode)))
+        return *options;
+    return {.flags = m_options | (1u << IconPreview) | (1u << ListPreview) | (1u << ColumnIcons)
+                     | (1u << ColumnIconPreview) | (1u << ListRelativeDates),
+            .sort = mode == Grid ? Manual : m_sortMode, .group = m_groupBy, .descending = m_sortDesc, .iconSize = m_gridIconSize,
+            .textSize = mode == Grid ? 12 : 13, .background = {}};
+}
+
+void Preferences::storeViewOptions(const std::string& key, const ViewOptions& value)
+{
+    m_viewOptions[key] = value;
+    if (!m_readOnly) {
+        m_settings->setValue(key + ".flags", int(value.flags));
+        m_settings->setValue(key + ".sort", value.sort);
+        m_settings->setValue(key + ".group", value.group);
+        m_settings->setValue(key + ".descending", value.descending);
+        m_settings->setValue(key + ".iconSize", value.iconSize);
+        m_settings->setValue(key + ".spacing", value.spacing);
+        m_settings->setValue(key + ".textSize", value.textSize);
+        m_settings->setValue(key + ".background", value.background);
+        m_settings->sync();
+    }
+    changed.emit();
+}
+
+void Preferences::setViewOptions(const std::string& url, int mode, const ViewOptions& options)
+{
+    if (options != viewOptions(url, mode))
+        storeViewOptions(viewOptionsKey(url, mode), options);
+}
+
+void Preferences::useViewDefaults(const std::string& url, int mode)
+{
+    storeViewOptions(viewOptionsKey({}, mode), viewOptions(url, mode));
+}
+
+static std::string pinnedViewKey(const std::string& url)
+{
+    return "PinnedViews/" + base::CryptographicHash::hashHex(url, base::CryptographicHash::Algorithm::Sha256);
+}
+
+int Preferences::pinnedView(const std::string& url) const
+{
+    if (url.empty())
+        return -1;
+    if (const auto it = m_pinnedViews.find(url); it != m_pinnedViews.end())
+        return it->second.first;
+    const auto key = pinnedViewKey(url);
+    const int mode = std::clamp(int(m_settings->intValue(key + ".mode", -1)), -1, int(Gallery));
+    const bool browse = mode >= 0 && m_settings->boolValue(key + ".browse", false);
+    m_pinnedViews.emplace(url, std::pair{mode, browse});
+    return mode;
+}
+
+bool Preferences::browseInPinnedView(const std::string& url) const
+{
+    return pinnedView(url) >= 0 && m_pinnedViews.at(url).second;
+}
+
+void Preferences::setPinnedView(const std::string& url, int mode, bool browse)
+{
+    if (url.empty() || mode < -1 || mode > Gallery)
+        return;
+    browse = mode >= 0 && browse;
+    if (mode == pinnedView(url) && browse == browseInPinnedView(url))
+        return;
+    m_pinnedViews[url] = {mode, browse};
+    if (!m_readOnly) {
+        const auto key = pinnedViewKey(url);
+        m_settings->setValue(key + ".mode", mode);
+        m_settings->setValue(key + ".browse", browse);
+        m_settings->sync();
+    }
+    changed.emit();
 }
 
 std::vector<std::string> Preferences::iconPositions(const std::string& url) const

@@ -5,6 +5,7 @@
 #include "views/browserviews.h"
 #include "views/previewclient.h"
 #include "core/preferences.h"
+#include "core/standardfolders.h"
 #include "model/foldermodel.h"
 #include "views/gridview.h"
 #include "views/listview.h"
@@ -15,6 +16,7 @@
 #include "base/i18n.h"
 #include "base/url.h"
 #include "ui/header_backdrop.h"
+#include "ui/image_view.h"
 #include "ui/keys.h"
 #include "ui/label.h"
 #include "ui/painter.h"
@@ -23,6 +25,7 @@
 #include "ui/theme.h"
 
 #include <algorithm>
+#include <charconv>
 #include <sys/statvfs.h>
 
 using cutefish::i18n::format;
@@ -40,6 +43,11 @@ FolderPage::FolderPage(FolderModelHost* host, const Start& start)
     setName("folderPage");
     setClipsChildren(true);
 
+    m_backgroundImage = addChild<ui::ImageView>();
+    m_backgroundImage->setFillMode(ui::ImageView::FillMode::PreserveAspectCrop);
+    m_backgroundImage->setAutoTransform(true);
+    m_backgroundImage->setVisible(false);
+
     m_noResults = addChild<ui::Label>(tr("No Results"));
     m_noResults->setFontSize(15 * 4.0 / 3);
     m_noResults->setVisible(false);
@@ -54,21 +62,19 @@ FolderPage::FolderPage(FolderModelHost* host, const Start& start)
     m_status->setFontSize(11);
 
     FolderModel& model = *m_model;
-    const auto applySort = [this] {
-        const Preferences& preferences = Preferences::instance();
-        const bool trash = m_model->isTrash();
-        m_model->setSortMode(trash ? preferences.trashSortMode() : preferences.sortMode());
-        m_model->setSortDesc(trash ? preferences.trashSortDesc() : preferences.sortDesc());
-        m_model->setSortDirsFirst(preferences.option(Preferences::FoldersFirst));
-        m_model->setGroupBy(trash ? Preferences::NoGroup : preferences.groupBy());
-    };
-    m_subscriptions.push_back(Preferences::instance().changed.connect([this, applySort] {
+    m_subscriptions.push_back(Preferences::instance().changed.connect([this] {
+        const int mode = Preferences::instance().viewMethod();
+        if (m_lastDefaultMode != mode) {
+            m_lastDefaultMode = mode;
+            chooseView(mode);
+        }
         applySort();
-        if (Preferences::instance().viewMethod() != m_viewMethod)
-            createView();
         updateDetails();
     }));
-    m_subscriptions.push_back(model.urlChanged.connect([this, applySort] {
+    m_subscriptions.push_back(model.urlChanged.connect([this] {
+        const int mode = locationView();
+        if (mode != m_viewMethod)
+            createView(mode);
         applySort();
         if (m_view) {
             m_view->reset();
@@ -107,9 +113,11 @@ FolderPage::FolderPage(FolderModelHost* host, const Start& start)
             onOpenInNewTab(url);
     }));
 
-    createView();
+    m_lastDefaultMode = Preferences::instance().viewMethod();
 
     m_model->setUrl(start.url.empty() ? FolderModel::resolve("~") : start.url);
+    if (!m_view)
+        createView(locationView());
     if (!start.back.empty() || !start.forward.empty())
         m_model->restoreHistory(start.back, start.forward);
     if (!start.selection.empty())
@@ -131,6 +139,55 @@ void FolderPage::quickLook() { m_preview->toggle(); }
 std::string FolderPage::currentUrl() const
 {
     return m_model->url();
+}
+
+Preferences::ViewOptions FolderPage::viewOptions() const
+{
+    return Preferences::instance().viewOptions(m_model->resolvedUrl(), m_viewMethod);
+}
+
+void FolderPage::setViewOptions(const Preferences::ViewOptions& options)
+{
+    Preferences::instance().setViewOptions(m_model->resolvedUrl(), m_viewMethod, options);
+}
+
+int FolderPage::locationView() const
+{
+    const auto& prefs = Preferences::instance();
+    const auto url = m_model->resolvedUrl();
+    if (const int mode = prefs.pinnedView(url); mode >= 0)
+        return mode;
+    if (const auto local = base::url::toLocalFile(url); local && local->starts_with('/')) {
+        for (auto path = *local; path != "/";) {
+            auto parent = parentPath(path);
+            if (parent.empty() || parent == path)
+                break;
+            const auto parentUrl = FolderModel::resolve(parent);
+            if (prefs.browseInPinnedView(parentUrl))
+                return prefs.pinnedView(parentUrl);
+            path = std::move(parent);
+        }
+    }
+    return prefs.viewMethod();
+}
+
+void FolderPage::chooseView(int mode)
+{
+    if (mode == m_viewMethod)
+        return;
+    createView(mode);
+    applySort();
+}
+
+void FolderPage::applySort()
+{
+    const auto& preferences = Preferences::instance();
+    const auto options = viewOptions();
+    const bool trash = m_model->isTrash();
+    m_model->setSortMode(trash ? preferences.trashSortMode() : std::max(int(Preferences::Name), options.sort));
+    m_model->setSortDesc(trash ? preferences.trashSortDesc() : options.sort != Preferences::Manual && options.descending);
+    m_model->setSortDirsFirst(preferences.option(Preferences::FoldersFirst));
+    m_model->setGroupBy(trash ? Preferences::NoGroup : options.group);
 }
 
 std::string FolderPage::folderName() const
@@ -218,11 +275,11 @@ void FolderPage::retranslate()
     requestLayout();
 }
 
-void FolderPage::createView()
+void FolderPage::createView(int mode)
 {
     if (m_viewMethod == Preferences::List)
         m_model->contents().collapseAll();
-    m_viewMethod = Preferences::instance().viewMethod();
+    m_viewMethod = mode;
     if (m_viewRoot) {
         std::shared_ptr<View> old = takeChild(m_viewRoot);
         base::EventLoop::current()->post([old] {});
@@ -327,6 +384,23 @@ void FolderPage::layout()
         const double bottom = rect.height - statusHeight - pathHeight;
         const double inspectorWidth = m_inspector->isVisible() ? std::min(250.0, rect.width * 0.45) : 0;
         const double width = rect.width - inspectorWidth;
+        const auto background = m_viewMethod == Preferences::Grid && !m_model->isTrash() && !m_model->isSearching()
+                ? viewOptions().background : std::string();
+        m_backgroundBox = {0, m_headerHeight, width, std::max(0.0, bottom - m_headerHeight)};
+        m_backgroundColor.reset();
+        if (background.size() == 7 && background[0] == '#') {
+            unsigned rgb = 0;
+            const auto* end = background.data() + background.size();
+            if (const auto result = std::from_chars(background.data() + 1, end, rgb, 16);
+                result.ec == std::errc() && result.ptr == end)
+                m_backgroundColor = ui::Color::rgb(rgb);
+        }
+        const std::string picture = background.starts_with('/') ? background : std::string();
+        m_backgroundImage->setVisible(!picture.empty());
+        if (m_backgroundImage->source() != picture)
+            m_backgroundImage->setSource(picture);
+        m_backgroundImage->setGeometry(m_backgroundBox);
+        requestPaint();
         m_inspector->setGeometry({width, m_headerHeight, inspectorWidth, std::max(0.0, bottom - m_headerHeight)});
         if (m_columns) {
             m_columns->setGeometry({0, m_headerHeight, width, std::max(0.0, bottom - m_headerHeight)});
@@ -357,6 +431,8 @@ void FolderPage::layout()
 void FolderPage::paint(ui::Painter& painter)
 {
     painter.fillRect(localRect(), ui::Theme::current().secondBackground);
+    if (m_backgroundColor)
+        painter.fillRect(m_backgroundBox, *m_backgroundColor);
 }
 
 void FolderPage::openUrl(const std::string& url)

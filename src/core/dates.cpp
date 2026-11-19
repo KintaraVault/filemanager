@@ -60,10 +60,12 @@ static int64_t dayNumber(const cutefish::base::CalendarDate& date)
     return int64_t(era) * 146097 + doe - 719468;
 }
 
-std::string columnTime(int64_t milliseconds)
+std::string columnTime(int64_t milliseconds, bool relative)
 {
     if (milliseconds <= 0)
         return {};
+    if (!relative)
+        return shortDateTime(milliseconds);
 
     const Locale& locale = Locale::system();
     const DateTime time = DateTime::fromSecondsSinceEpoch(milliseconds / 1000);

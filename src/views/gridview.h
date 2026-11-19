@@ -4,6 +4,7 @@
 #pragma once
 
 #include "views/icongridview.h"
+#include "core/preferences.h"
 
 #include <map>
 
@@ -14,7 +15,7 @@ namespace fm {
 // shared evenly among the gaps between them and at both ends.
 struct GridColumns
 {
-    static GridColumns forWidth(double width, double iconSize);
+    static GridColumns forWidth(double width, double iconSize, double spacing = 10, bool labelsRight = false);
 
     // The left edge of a column's cell, unrounded.
     double x(int column) const { return gap + column * (cellWidth + gap); }
@@ -37,6 +38,8 @@ public:
     void increaseIconSize();
     void decreaseIconSize();
     void cleanUp();
+    const Preferences::ViewOptions& options() const { return m_options; }
+    bool showsIconPreview() const override { return m_options.option(Preferences::IconPreview); }
 
     int columns() const { return m_grid.count; }
     double cellWidth() const { return m_grid.cellWidth; }
@@ -51,6 +54,7 @@ public:
 
 protected:
     std::unique_ptr<IconItem> makeItem() override;
+    bool centeredRename() const override { return !m_options.option(Preferences::IconRight); }
     int indexAt(ui::PointF content) const override;
     int rowOf(int index) const override;
     int indexOfRow(int row) const override;
@@ -84,6 +88,7 @@ private:
 
     GridColumns m_grid;
     double m_cellHeight = 0;
+    Preferences::ViewOptions m_options;
     base::Subscription m_preferences;
 };
 

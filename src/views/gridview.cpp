@@ -3,6 +3,7 @@
 
 #include "views/gridview.h"
 #include "core/preferences.h"
+#include "core/dates.h"
 #include "model/foldermodel.h"
 #include "views/style.h"
 
@@ -30,15 +31,14 @@ static constexpr double kMinimumIconSize = 22;
 static constexpr double kMinimumCellWidth = 104;
 static constexpr double kLabelInset = 4;
 // A column takes its cell and 10 px; the width keeps another 6.
-static constexpr double kColumnSpacing = 10;
 static constexpr double kEndMargin = 6;
 static constexpr double kSectionHeight = 32;
 
-GridColumns GridColumns::forWidth(double width, double iconSize)
+GridColumns GridColumns::forWidth(double width, double iconSize, double spacing, bool labelsRight)
 {
     GridColumns columns;
-    columns.cellWidth = std::max(kMinimumCellWidth, std::ceil(iconSize * 1.125 + 2));
-    columns.count = std::max(1, int(std::floor((width - kEndMargin) / (columns.cellWidth + kColumnSpacing))));
+    columns.cellWidth = std::max(kMinimumCellWidth, std::ceil(iconSize * 1.125 + 2)) + (labelsRight ? 105 : 0);
+    columns.count = std::max(1, int(std::floor((width - kEndMargin) / (columns.cellWidth + spacing))));
     columns.gap = std::max(0.0, (width - columns.count * columns.cellWidth) / (columns.count + 1));
     return columns;
 }
@@ -75,16 +75,29 @@ public:
         m_thumbnailTint = addChild<ThumbnailTint>();
         m_thumbnailTint->setVisible(false);
         addLabelView();
+        m_info = addChild<ui::Label>();
+        m_info->setFontSize(10);
+        m_info->setElide(ui::Label::Elide::Right);
     }
 
 protected:
-    bool bindItem(const FileItem&, int row) override
+    bool bindItem(const FileItem& item, int row) override
     {
         std::string name = m_grid->model().displayName(row);
         const bool renamed = name != m_label->text();
         m_label->setText(std::move(name));
+        const auto& options = m_grid->options();
+        m_labelCentered = !options.option(Preferences::IconRight);
+        const auto alignment = m_labelCentered ? ui::Label::TextAlignment::Center : ui::Label::TextAlignment::Left;
+        m_label->setTextAlignment(alignment);
+        m_label->setFontSize(options.textSize);
         m_label->setMaximumLineCount(m_selected ? 3 : 2);
         m_label->setColor(m_selected ? style::selectedTextColor() : ui::Theme::current().text);
+        const bool info = options.option(Preferences::IconInfo) && !item.isDir;
+        m_info->setVisible(info);
+        m_info->setTextAlignment(alignment);
+        m_info->setColor(ui::Theme::current().disabledText);
+        m_info->setText(info ? formatSize(item.size) : std::string());
         return renamed;
     }
 
@@ -94,7 +107,8 @@ protected:
         const double iconSize = m_grid->iconSize();
         const double cellWidth = m_grid->cellWidth();
         const double iconItemWidth = std::min(iconSize + kLargeSpacing * 2, cellWidth);
-        layoutIcon({centeredStart(width, iconItemWidth), kSmallSpacing, iconItemWidth, iconSize}, 16);
+        const bool right = m_grid->options().option(Preferences::IconRight);
+        layoutIcon({right ? 0 : centeredStart(width, iconItemWidth), kSmallSpacing, iconItemWidth, iconSize}, 16);
 
         const bool thumbnailShown = m_thumbnail->isVisible();
         m_thumbnailTint->setVisible(m_selected && thumbnailShown);
@@ -104,23 +118,27 @@ protected:
             m_thumbnailTint->setOpacity(0.5 * (m_hidden ? 0.5 : 1.0));
         }
 
-        const double labelWidth = cellWidth - kLabelInset;
+        const double labelWidth = std::max(0.0, cellWidth - kLabelInset - (right ? iconItemWidth : 0));
         const double labelHeight = m_label->heightForWidth(labelWidth);
-        m_label->setGeometry({centeredStart(width, labelWidth), kSmallSpacing + iconSize + kSmallSpacing, labelWidth,
-                              labelHeight});
+        const double x = right ? iconItemWidth : centeredStart(width, labelWidth);
+        const double y = right ? std::max(kSmallSpacing, (geometry().height - labelHeight - (m_info->isVisible() ? 14 : 0)) / 2)
+                               : kSmallSpacing + iconSize + kSmallSpacing;
+        m_label->setGeometry({x, y, labelWidth, labelHeight});
+        m_info->setGeometry({x, y + labelHeight + 1, labelWidth, 14});
     }
 
 private:
     FolderGridView* m_grid;
     ThumbnailTint* m_thumbnailTint;
+    ui::Label* m_info;
 };
 
 FolderGridView::FolderGridView(FolderModel& model)
     : IconGridView(model)
 {
     setName("FolderGridView");
-    m_iconSize = Preferences::instance().gridIconSize();
     updateMetrics();
+    m_preferences = Preferences::instance().changed.connect([this] { requestLayout(); });
 }
 
 FolderGridView::~FolderGridView() = default;
@@ -134,9 +152,9 @@ void FolderGridView::setIconSize(double size)
 {
     if (m_iconSize == size)
         return;
-    m_iconSize = size;
-    Preferences::instance().setGridIconSize(size);
-    requestLayout();
+    auto options = Preferences::instance().viewOptions(model().resolvedUrl(), Preferences::Grid);
+    options.iconSize = size;
+    Preferences::instance().setViewOptions(model().resolvedUrl(), Preferences::Grid, options);
 }
 
 void FolderGridView::increaseIconSize()
@@ -156,8 +174,12 @@ void FolderGridView::updateMetrics()
     const int fromColumns = m_grid.count;
     const double fromRowHeight = m_cellHeight;
 
-    m_grid = GridColumns::forWidth(geometry().width, m_iconSize);
-    m_cellHeight = m_iconSize + style::fontHeight() * 2 + kLargeSpacing * 2;
+    m_options = Preferences::instance().viewOptions(model().resolvedUrl(), Preferences::Grid);
+    m_iconSize = m_options.iconSize;
+    const bool right = m_options.option(Preferences::IconRight);
+    m_grid = GridColumns::forWidth(geometry().width, m_iconSize, m_options.spacing, right);
+    const double labelArea = m_options.textSize * 2.45 + (m_options.option(Preferences::IconInfo) ? 15 : 0);
+    m_cellHeight = (right ? std::max(m_iconSize, labelArea) : m_iconSize + labelArea) + 14 + m_options.spacing;
 
     if (fromRowHeight > 0)
         reflow(fromColumns, fromRowHeight);
@@ -213,7 +235,7 @@ void FolderGridView::updatePositions()
         m_sections.push_back({first, gridRow, name});
         gridRow += (end - first + m_grid.count - 1) / m_grid.count;
     }
-    if (!sections.empty() || m_saved.empty() || model().isTrash() || model().isSearching())
+    if (m_options.sort != Preferences::Manual || !sections.empty() || m_saved.empty() || model().isTrash() || model().isSearching())
         return;
     m_itemCells.resize(model().count(), -1);
     const int limit = model().count() + 512;
@@ -271,7 +293,7 @@ void FolderGridView::cleanUp()
 bool FolderGridView::rearrange(const std::vector<std::string>& urls, int destinationRow, uint32_t action, ui::PointF point, bool apply)
 {
     if (action != ui::MoveAction || destinationRow >= 0 || model().isTrash() || model().isSearching()
-        || Preferences::instance().groupBy() != Preferences::NoGroup || urls.empty() || point.y < topMargin()
+        || m_options.sort != Preferences::Manual || m_options.group != Preferences::NoGroup || urls.empty() || point.y < topMargin()
         || !std::all_of(urls.begin(), urls.end(), [this](const auto& url) { return model().rowForUrl(url) >= 0; }))
         return false;
     if (!apply)

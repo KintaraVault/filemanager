@@ -48,6 +48,7 @@ public:
     void setHeader(double height, double buttonMargin);
     // FishUI.DialogWindow's title on the window controls' line, 14 px, 16 in.
     void setHeaderTitle(std::string title);
+    void setCenteredHeader(bool centered) { m_centeredHeader = centered; }
     // Paddings other than the one on every side: left/right and top/bottom.
     void setPadding(double horizontal, double top, double bottom);
     // After the content's size may have changed.
@@ -78,6 +79,7 @@ private:
     double m_header = 0;
     double m_buttonMargin = 8;
     std::string m_headerTitle;
+    bool m_centeredHeader = false;
     ui::Window* m_parent = nullptr;
     bool m_modal = false;
     std::unique_ptr<ui::Window> m_window;

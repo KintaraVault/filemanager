@@ -21,7 +21,7 @@ static constexpr double kSlot = 32;
 class FramelessDialog::Root : public ui::View
 {
 public:
-    explicit Root(bool closeButton)
+    Root(bool closeButton, bool centeredHeader) : m_centeredHeader(centeredHeader)
     {
         if (closeButton) {
             m_controls = addChild<ui::WindowHeader>();
@@ -35,6 +35,10 @@ public:
             m_title = addChild<ui::Label>();
             m_title->setFontSize(14);
             m_title->setVerticallyCentered(true);
+            if (m_centeredHeader) {
+                m_title->setTextAlignment(ui::Label::TextAlignment::Center);
+                m_title->setElide(ui::Label::Elide::Middle);
+            }
         }
         m_title->setText(text);
         m_title->setColor(ui::ColorId::Text);
@@ -82,6 +86,12 @@ public:
     bool acceptsPointer() const override { return true; }
 
 protected:
+    void paint(ui::Painter& painter) override
+    {
+        if (m_centeredHeader && m_header > 0)
+            painter.fillRect({0, m_header, geometry().width, 1}, ui::Theme::current().text.withAlpha(0.11));
+    }
+
     void layout() override
     {
         const double width = geometry().width - m_horizontal * 2;
@@ -111,6 +121,7 @@ private:
     ui::View* m_content = nullptr;
     ui::WindowHeader* m_controls = nullptr;
     ui::Label* m_title = nullptr;
+    bool m_centeredHeader;
     double m_width = 480;
     double m_horizontal = 16;
     double m_top = 16;
@@ -187,7 +198,7 @@ void FramelessDialog::show()
     m_window->setTitle(m_title);
     if (m_parent)
         m_window->setTransientParent(m_parent, m_modal);
-    auto root = std::make_unique<Root>(m_closeButton);
+    auto root = std::make_unique<Root>(m_closeButton, m_centeredHeader);
     m_root = root.get();
     m_window->setContentView(std::move(root));
     m_window->setBackgroundColor(ui::ColorId::SecondBackground);

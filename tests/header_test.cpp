@@ -8,6 +8,8 @@
 #include "views/folderpage.h"
 #include "views/folderview.h"
 #include "views/folderwindow.h"
+#include "views/gridview.h"
+#include "views/listview.h"
 #include "views/renameeditor.h"
 
 #include "base/url.h"
@@ -217,6 +219,108 @@ TEST(HeaderTest, ListExpansionDoesNotNavigate)
     model.contents().toggleExpansion(branch, false);
     EXPECT_LT(model.rowForUrl(notes), 0);
     EXPECT_GE(model.rowForUrl(branch), 0);
+}
+
+TEST(HeaderTest, ViewOptionsSwitchModesAndApplyToTheCurrentFolder)
+{
+    auto& prefs = fm::Preferences::instance();
+    const int originalMode = prefs.viewMethod();
+    struct Restore { fm::Preferences& prefs; int mode; ~Restore() { prefs.setViewMethod(mode); } } restore{prefs, originalMode};
+    prefs.setViewMethod(fm::Preferences::Grid);
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    std::filesystem::create_directory(directory.filePath("next"));
+    const auto root = base::url::fromLocalFile(directory.path());
+    const auto next = base::url::fromLocalFile(directory.filePath("next"));
+    WindowHost host;
+    fm::FolderWindow window(&host, {root, {}, {}, {}});
+    window.show();
+    window.toggleViewOptions();
+    auto* panel = window.viewOptionsWindow();
+    ASSERT_NE(panel, nullptr);
+    panel->grab();
+    EXPECT_NE(panel->layoutDump().find("viewOptionsPanel"), std::string::npos);
+    const auto gridHeight = panel->size().height;
+    auto* page = window.currentPage();
+    auto options = page->viewOptions();
+    options.iconSize = 128;
+    options.spacing = 32;
+    options.setOption(fm::Preferences::IconRight, true);
+    page->setViewOptions(options);
+    window.window().grab();
+    auto* grid = dynamic_cast<fm::FolderGridView*>(page->view());
+    ASSERT_NE(grid, nullptr);
+    EXPECT_EQ(grid->iconSize(), 128);
+    EXPECT_EQ(grid->options().spacing, 32);
+    EXPECT_TRUE(grid->options().option(fm::Preferences::IconRight));
+    prefs.setViewMethod(fm::Preferences::List);
+    ASSERT_TRUE(runUntil(s_app->loop(), [&] { panel->grab(); return panel->size().height != gridHeight; }));
+    EXPECT_EQ(window.viewOptionsWindow(), panel);
+    auto listOptions = page->viewOptions();
+    listOptions.setOption(fm::Preferences::ListCreated, true);
+    page->setViewOptions(listOptions);
+    window.window().grab();
+    auto* list = dynamic_cast<fm::FolderListView*>(page->view());
+    ASSERT_NE(list, nullptr);
+    EXPECT_TRUE(list->columns().created);
+    for (const auto mode : {fm::Preferences::Columns, fm::Preferences::Gallery, fm::Preferences::Grid}) {
+        prefs.setViewMethod(mode);
+        fmtest::runFor(s_app->loop(), 20);
+        EXPECT_EQ(window.viewOptionsWindow(), panel);
+        EXPECT_EQ(page->viewMethod(), mode);
+    }
+    page->openUrl(next);
+    EXPECT_NE(page->viewOptions().iconSize, 128);
+    page->goBack();
+    EXPECT_EQ(page->viewOptions().iconSize, 128);
+    ASSERT_TRUE(panel->onCloseRequested);
+    panel->onCloseRequested();
+    EXPECT_EQ(window.viewOptionsWindow(), nullptr);
+}
+
+TEST(HeaderTest, PinnedViewIsUsedOnNavigationAndCanExtendToDescendants)
+{
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    std::filesystem::create_directories(directory.filePath("branch/sub"));
+    const auto root = base::url::fromLocalFile(directory.path());
+    const auto branch = base::url::fromLocalFile(directory.filePath("branch"));
+    const auto sub = base::url::fromLocalFile(directory.filePath("branch/sub"));
+    auto& prefs = fm::Preferences::instance();
+    const int pinned = prefs.viewMethod() == fm::Preferences::Columns ? fm::Preferences::List : fm::Preferences::Columns;
+    prefs.setPinnedView(branch, pinned, true);
+    WindowHost host;
+    fm::FolderWindow window(&host, {branch, {}, {}, {}});
+    auto* page = window.currentPage();
+    EXPECT_EQ(page->viewMethod(), pinned);
+    page->openUrl(sub);
+    EXPECT_EQ(page->viewMethod(), pinned);
+    page->openUrl(root);
+    EXPECT_EQ(page->viewMethod(), prefs.viewMethod());
+    page->goBack();
+    EXPECT_EQ(page->viewMethod(), pinned);
+}
+
+TEST(HeaderTest, ViewDefaultsPersistAndDoNotAffectOtherModes)
+{
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    const auto path = directory.filePath("preferences.conf");
+    {
+        fm::Preferences prefs(path);
+        auto options = prefs.viewOptions("file:///first", fm::Preferences::Grid);
+        options.spacing = 32;
+        options.sort = fm::Preferences::ModifiedTime;
+        options.group = fm::Preferences::KindGroup;
+        prefs.setViewOptions("file:///first", fm::Preferences::Grid, options);
+        EXPECT_NE(prefs.viewOptions("file:///second", fm::Preferences::Grid), options);
+        prefs.useViewDefaults("file:///first", fm::Preferences::Grid);
+        EXPECT_EQ(prefs.viewOptions("file:///second", fm::Preferences::Grid), options);
+    }
+    fm::Preferences prefs(path);
+    EXPECT_EQ(prefs.viewOptions("file:///second", fm::Preferences::Grid).spacing, 32);
+    EXPECT_EQ(prefs.viewOptions("file:///first", fm::Preferences::Grid).group, fm::Preferences::KindGroup);
+    EXPECT_EQ(prefs.viewOptions("file:///second", fm::Preferences::List).sort, fm::Preferences::Name);
 }
 
 // A new session language takes the text again where the user was: the tabs,

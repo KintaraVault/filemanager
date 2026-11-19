@@ -33,6 +33,7 @@ public:
     using FolderView::FolderView;
 
     double iconSize() const { return m_iconSize; }
+    virtual bool showsIconPreview() const { return true; }
     // An item's cell in content coordinates.
     virtual ui::RectF cellRect(int index) const = 0;
 
@@ -104,6 +105,7 @@ protected:
     int m_index = -1;
     bool m_selected = false;
     bool m_hidden = false;
+    bool m_labelCentered = true;
     ui::RectF m_iconItem;
     FolderThemeIcon* m_icon = nullptr;
     ui::ImageView* m_thumbnail = nullptr;

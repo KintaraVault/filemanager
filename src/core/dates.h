@@ -12,6 +12,6 @@ namespace fm::dates {
 std::string friendlyTime(int64_t milliseconds);
 // "Today at 9:41", "Yesterday at 9:41", else the short date and time; empty
 // for no time.
-std::string columnTime(int64_t milliseconds);
+std::string columnTime(int64_t milliseconds, bool relative = true);
 
 } // namespace fm::dates

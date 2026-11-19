@@ -25,6 +25,11 @@ struct ListColumns
     bool kind = true;
     bool created = false;
     bool accessed = false;
+    bool showIcons = true;
+    bool iconPreview = true;
+    bool relativeDates = true;
+    int rowIconSize = 22;
+    int textSize = 0;
     static constexpr double extraDateWidth = 150;
     double originWidth = 200;
     double dateWidth = 180;
@@ -65,6 +70,7 @@ public:
     ~FolderListView() override;
 
     double headerHeight() const override;
+    double rowHeight() const;
     const ListColumns& columns() const { return m_columns; }
     void sortBy(int mode);
     void setColumnWidth(int column, double width, bool save);

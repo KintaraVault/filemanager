@@ -203,7 +203,7 @@ void IconItem::bind(int index, int row)
     m_overlay->setSize(iconSize);
     m_overlay->setColor(ui::Theme::current().highlight);
 
-    const bool thumbnail = model.showsThumbnail(row);
+    const bool thumbnail = m_view->showsIconPreview() && model.showsThumbnail(row);
     if (fresh || thumbnail != m_wantsThumbnail || item->modified != m_modified || item->path != m_path) {
         m_wantsThumbnail = thumbnail;
         m_modified = item->modified;
@@ -235,7 +235,7 @@ ui::RectF IconItem::labelRect() const
 {
     const ui::RectF box = m_label->geometry();
     const double width = paintedWidth();
-    return {box.x + (box.width - width) / 2, box.y, width, box.height};
+    return {box.x + (m_labelCentered ? (box.width - width) / 2 : 0), box.y, width, box.height};
 }
 
 ui::RectF IconItem::labelBox() const
@@ -290,7 +290,12 @@ void IconItem::paint(ui::Painter& painter)
         const double width = std::max(m_iconItem.width, paintedWidth());
         const double height = m_iconItem.height + m_label->geometry().height + 12;
         const ui::Color color = m_dropAllowed ? theme.highlight : style::kDanger;
-        painter.drawRoundedRect({(geometry().width - width) / 2, m_iconItem.y, width, height},
+        const auto label = labelRect();
+        const auto left = std::min(m_iconItem.x, label.x);
+        const auto right = std::max(m_iconItem.x + m_iconItem.width, label.x + label.width);
+        const ui::RectF target = m_labelCentered ? ui::RectF{(geometry().width - width) / 2, m_iconItem.y, width, height}
+            : ui::RectF{left, m_iconItem.y, right - left, std::max(m_iconItem.height, label.y + label.height - m_iconItem.y)};
+        painter.drawRoundedRect(target,
                                 {theme.mediumRadius, 0, ui::Corners::Circular}, style::withAlpha(color, 0.16), 2,
                                 color);
     }
@@ -309,7 +314,7 @@ void IconItem::paint(ui::Painter& painter)
             if (!line)
                 break;
             const double lineWidth = std::max(0.0, std::min(box.width, line->width));
-            const ui::RectF rect {(box.width - lineWidth) / 2, line->top, lineWidth, line->height};
+            const ui::RectF rect {m_labelCentered ? (box.width - lineWidth) / 2 : 0, line->top, lineWidth, line->height};
             if (rect.width <= 0 || rect.height <= 0)
                 continue;
             addRoundedRect(path, {origin.x + rect.x, origin.y + rect.y, rect.width + hPadding * 2,

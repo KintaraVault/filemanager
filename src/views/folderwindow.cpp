@@ -3,6 +3,7 @@
 
 #include "views/colors.h"
 #include "views/folderwindow.h"
+#include "dialogs/viewoptionsdialog.h"
 #include "core/preferences.h"
 #include "core/filetags.h"
 #include "views/folderview.h"
@@ -78,9 +79,9 @@ static std::vector<std::string> viewNames()
     return {tr("Icons"), tr("List"), tr("Columns"), tr("Gallery")};
 }
 
-static int viewIndex()
+static int viewIndex(int mode)
 {
-    return int(std::find(kViews.begin(), kViews.end(), Preferences::instance().viewMethod()) - kViews.begin());
+    return int(std::find(kViews.begin(), kViews.end(), mode) - kViews.begin());
 }
 
 // Where a search looks, home or the folder it started from.
@@ -312,8 +313,8 @@ public:
             control->setContentHeight(labels ? 32 : 26);
             control->setFontSize(10);
             control->setGlyphs({"grid", "list", "view-columns", "view-gallery"}, labels);
-            control->onCurrentChanged = [](int index) { Preferences::instance().setViewMethod(kViews.at(size_t(index))); };
-            control->setCurrentIndex(viewIndex());
+            control->onCurrentChanged = [this](int index) { if (onViewChanged) onViewChanged(kViews.at(size_t(index))); };
+            control->setCurrentIndex(viewIndex(mode));
             return control;
         }, {"grid", "list", "view-columns", "view-gallery"}}, {"group", tr("Group"), "view-group", 39, {}, {}, true},
                   {"share", tr("Share"), "share"}, {"tags", tr("Tags"), "tag"},
@@ -331,7 +332,7 @@ public:
         toolbar->setOrder(prefs.toolbarOrder());
         for (const auto& child : toolbar->children())
             if (auto* control = dynamic_cast<ui::SegmentedControl*>(child.get()))
-                control->setCurrentIndex(viewIndex());
+                control->setCurrentIndex(viewIndex(mode));
     }
 
     ui::NavigationButtons* navigation;
@@ -340,6 +341,8 @@ public:
     PathBar* pathBar;
     ui::Toolbar* toolbar;
     std::vector<ui::Toolbar::Item> items;
+    std::function<void(int)> onViewChanged;
+    int mode = Preferences::Grid;
     double sidebarWidth = SideBar::kDefaultWidth;
 
 protected:
@@ -607,6 +610,7 @@ FolderWindow::FolderWindow(FileManagerHost* host, const FolderPage::Start& start
             page->goForward();
     };
     m_root->row->toolbar->onActivated = [this](const std::string& id, ui::PointF point) { toolbarAction(id, point); };
+    m_root->row->onViewChanged = [this](int mode) { selectView(mode); };
     m_root->row->toolbar->onOrderChanged = [](const std::vector<std::string>& order) { Preferences::instance().setToolbarOrder(order); };
 
     m_pathBar->onItemClicked = [this](const std::string& path) {
@@ -674,7 +678,9 @@ FolderWindow::FolderWindow(FileManagerHost* host, const FolderPage::Start& start
     };
     m_window->onStatesChanged = [this] { updateBackground(); };
     m_window->onCloseRequested = [this] { close(); };
-    m_subscriptions.push_back(Preferences::instance().changed.connect([this] { updateHeader(); }));
+    m_subscriptions.push_back(Preferences::instance().changed.connect([this] {
+        base::EventLoop::current()->post([this, alive = m_alive] { if (*alive) updateHeader(); });
+    }));
     m_subscriptions.push_back(ui::Application::instance()->languageChanged.connect([this] { retranslate(); }));
 
     addShortcuts();
@@ -753,9 +759,18 @@ void FolderWindow::addShortcuts()
         setCurrentTab((m_currentTab + tabCount() - 1) % std::max(1, tabCount()));
     });
     window.addShortcut(ui::ControlModifier, 'f', [this] { m_pathBar->openSearch(); });
+    window.addShortcut(ui::ControlModifier, 'j', [this] { toggleViewOptions(); });
     for (size_t i = 0; i < kViews.size(); ++i)
-        window.addShortcut(ui::ControlModifier, '1' + i, [i] { Preferences::instance().setViewMethod(kViews[i]); });
+        window.addShortcut(ui::ControlModifier, '1' + i, [this, i] { selectView(kViews[i]); });
     window.addShortcut(ui::ControlModifier, 'k', [this] { m_sidebar->connectToServer(); });
+}
+
+void FolderWindow::selectView(int mode)
+{
+    Preferences::instance().setViewMethod(mode);
+    if (auto* page = currentPage())
+        page->chooseView(mode);
+    updateHeader();
 }
 
 void FolderWindow::openTab(const std::string& url)
@@ -1012,6 +1027,9 @@ void FolderWindow::updateHeader()
     FolderModel& model = page->model();
     m_window->setTitle(page->folderName());
     m_pathBar->setFolderTitle(page->folderName());
+    if (m_viewOptions && m_viewOptions->isShown())
+        m_viewOptions->sync(page);
+    m_root->row->mode = page->viewMethod();
     m_root->row->syncToolbar();
     m_back->setEnabled(model.canGoBack());
     m_forward->setEnabled(model.canGoForward());
@@ -1056,7 +1074,7 @@ void FolderWindow::showContextMenu(ui::PointF position)
     m_menu->addSeparator();
     const auto quick = m_menu->addItem(tr("Quick Look"), [this] { if (auto* p = currentPage()) p->quickLook(); });
     m_menu->setItemEnabled(quick, page->model().hasSelection());
-    populateViewOptions(*m_menu->addSubmenu(tr("View Options")));
+    m_menu->addItem(tr("Show View Options"), [this] { toggleViewOptions(); });
     m_menu->addItem(tr("Customize Toolbar…"), [this] { setToolbarEditing(true); });
     m_menu->popup(m_window.get(), position);
 }
@@ -1078,47 +1096,33 @@ void FolderWindow::populateGrouping(ui::Menu& menu)
         {trNoop("Date Created"), Preferences::CreatedGroup}, {trNoop("Application"), Preferences::ApplicationGroup},
         {trNoop("Size"), Preferences::SizeGroup}, {trNoop("Tags"), Preferences::TagsGroup}};
     for (const auto& [name, group] : groups) {
-        const auto index = menu.addItem(tr(name), [group] { Preferences::instance().setGroupBy(group); });
-        menu.setItemChecked(index, Preferences::instance().groupBy() == group);
+        const auto index = menu.addItem(tr(name), [this, group] {
+            if (auto* page = currentPage()) {
+                auto options = page->viewOptions();
+                options.group = group;
+                page->setViewOptions(options);
+            }
+        });
+        menu.setItemChecked(index, currentPage() && currentPage()->viewOptions().group == group);
     }
 }
 
-void FolderWindow::populateViewOptions(ui::Menu& menu)
+void FolderWindow::toggleViewOptions()
 {
-    auto& prefs = Preferences::instance();
-    switch (prefs.viewMethod()) {
-    case Preferences::Grid: {
-        auto* sizes = menu.addSubmenu(tr("Icon Size"));
-        for (double size : {32.0, 48.0, 64.0, 96.0, 128.0, 192.0}) {
-            const auto row = sizes->addItem(std::to_string(int(size)), [size] { Preferences::instance().setGridIconSize(size); });
-            sizes->setItemChecked(row, prefs.gridIconSize() == size);
-        }
-        menu.addItem(tr("Clean Up"), [this] {
-            if (auto* page = currentPage()) {
-                if (auto* grid = dynamic_cast<FolderGridView*>(page->view()))
-                    grid->cleanUp();
-            }
-        });
-        break;
+    auto* page = currentPage();
+    if (!page)
+        return;
+    if (!m_viewOptions)
+        m_viewOptions = std::make_unique<ViewOptionsDialog>(m_window.get());
+    if (m_viewOptions->isShown()) {
+        m_viewOptions->hide();
+    } else {
+        m_viewOptions->sync(page);
+        m_viewOptions->show();
     }
-    case Preferences::List:
-        toggleOption(menu, trNoop("Date Modified"), Preferences::ListDate);
-        toggleOption(menu, trNoop("Size"), Preferences::ListSize);
-        toggleOption(menu, trNoop("Kind"), Preferences::ListKind);
-        toggleOption(menu, trNoop("Date Created"), Preferences::ListCreated);
-        toggleOption(menu, trNoop("Date Accessed"), Preferences::ListAccessed);
-        break;
-    case Preferences::Columns:
-        toggleOption(menu, trNoop("Show Preview Column"), Preferences::ColumnPreview);
-        toggleOption(menu, trNoop("Fit Columns to Filenames"), Preferences::ColumnFit);
-        break;
-    case Preferences::Gallery:
-        toggleOption(menu, trNoop("Show Filenames"), Preferences::GalleryNames);
-        break;
-    }
-    menu.addSeparator();
-    toggleOption(menu, trNoop("Keep Folders on Top"), Preferences::FoldersFirst);
 }
+
+ui::Window* FolderWindow::viewOptionsWindow() const { return m_viewOptions ? m_viewOptions->window() : nullptr; }
 
 void FolderWindow::populateSidebarSettings(ui::Menu& menu)
 {
@@ -1156,8 +1160,13 @@ void FolderWindow::toolbarAction(const std::string& id, ui::PointF position)
     if (id == "newfolder") { model.newFolder(); return; }
     if (id == "preview") {
         auto& prefs = Preferences::instance();
-        const auto preview = prefs.viewMethod() == Preferences::Columns ? Preferences::ColumnPreview : Preferences::PreviewPane;
-        prefs.setOption(preview, !prefs.option(preview));
+        if (page->viewMethod() == Preferences::Columns) {
+            auto options = page->viewOptions();
+            options.setOption(Preferences::ColumnPreview, !options.option(Preferences::ColumnPreview));
+            page->setViewOptions(options);
+        } else {
+            prefs.setOption(Preferences::PreviewPane, !prefs.option(Preferences::PreviewPane));
+        }
         return;
     }
     if (id == "action") { showContextMenu(position); return; }
@@ -1168,8 +1177,8 @@ void FolderWindow::toolbarAction(const std::string& id, ui::PointF position)
     } else if (id == "views") {
         const auto names = viewNames();
         for (size_t i = 0; i < kViews.size(); ++i) {
-            const auto row = m_menu->addItem(names[i], [i] { Preferences::instance().setViewMethod(kViews[i]); });
-            m_menu->setItemChecked(row, viewIndex() == int(i));
+            const auto row = m_menu->addItem(names[i], [this, i] { selectView(kViews[i]); });
+            m_menu->setItemChecked(row, viewIndex(page->viewMethod()) == int(i));
         }
     } else if (id == "tags") {
         std::vector<std::string> paths;
@@ -1363,15 +1372,20 @@ void FolderWindow::buildMainMenu()
     const auto names = viewNames();
     std::array<size_t, 4> viewRows {};
     for (size_t i = 0; i < kViews.size(); ++i) {
-        viewRows[i] = view->addItem(names[i], [i] { Preferences::instance().setViewMethod(kViews[i]); });
+        viewRows[i] = view->addItem(names[i], [this, i] { selectView(kViews[i]); });
         view->setItemKeyEquivalent(viewRows[i], std::to_string(i + 1), control);
     }
     view->addSeparator();
     ui::Menu* sort = view->addSubmenu(tr("Sort By"));
     ui::Menu* group = view->addSubmenu(tr("Group By"));
     group->onAboutToShow = [this, group] { group->clear(); populateGrouping(*group); };
-    ui::Menu* options = view->addSubmenu(tr("View Options"));
-    options->onAboutToShow = [this, options] { options->clear(); populateViewOptions(*options); };
+    const auto options = view->addItem(tr("Show View Options"), [this] { toggleViewOptions(); });
+    view->setItemKeyEquivalent(options, "j", control);
+    const auto cleanup = view->addItem(tr("Clean Up"), [this] {
+        if (auto* page = currentPage())
+            if (auto* grid = dynamic_cast<FolderGridView*>(page->view())) grid->cleanUp();
+    });
+    toggleOption(*view, trNoop("Keep Folders on Top"), Preferences::FoldersFirst);
     ui::Menu* sidebar = view->addSubmenu(tr("Sidebar Settings"));
     sidebar->onAboutToShow = [this, sidebar] { sidebar->clear(); populateSidebarSettings(*sidebar); };
     ui::Menu* toolbar = view->addSubmenu(tr("Toolbar"));
@@ -1400,15 +1414,19 @@ void FolderWindow::buildMainMenu()
     view->addSeparator();
     const size_t refresh = view->addItem(tr("Refresh"), onPage([](FolderPage& page) { page.model().refresh(); }));
     view->setItemKeyEquivalent(refresh, "F5", 0);
-    view->onAboutToShow = [prepare, view, viewRows, hidden, path, status, preview] {
+    view->onAboutToShow = [this, prepare, view, viewRows, hidden, path, status, preview, cleanup, options] {
         prepare();
         const Preferences& preferences = Preferences::instance();
+        const auto* page = currentPage();
         for (size_t i = 0; i < viewRows.size(); ++i)
-            view->setItemChecked(viewRows[i], viewIndex() == int(i));
+            view->setItemChecked(viewRows[i], page && viewIndex(page->viewMethod()) == int(i));
         view->setItemText(path, preferences.option(Preferences::PathBar) ? tr("Hide Path Bar") : tr("Show Path Bar"));
         view->setItemText(status, preferences.option(Preferences::StatusBar) ? tr("Hide Status Bar") : tr("Show Status Bar"));
-        const auto pane = preferences.viewMethod() == Preferences::Columns ? Preferences::ColumnPreview : Preferences::PreviewPane;
-        view->setItemText(preview, preferences.option(pane) ? tr("Hide Preview") : tr("Show Preview"));
+        const bool previewShown = page && page->viewMethod() == Preferences::Columns
+                ? page->viewOptions().option(Preferences::ColumnPreview) : preferences.option(Preferences::PreviewPane);
+        view->setItemText(preview, previewShown ? tr("Hide Preview") : tr("Show Preview"));
+        view->setItemText(options, viewOptionsWindow() ? tr("Hide View Options") : tr("Show View Options"));
+        view->setItemEnabled(cleanup, page && page->viewMethod() == Preferences::Grid);
         if (ui::commandKeys())
             view->setItemKeyEquivalent(hidden, ".", ui::ControlModifier | ui::ShiftModifier);
         else
@@ -1419,17 +1437,22 @@ void FolderWindow::buildMainMenu()
         FolderPage* page = currentPage();
         const bool trash = page && page->model().isTrash();
         Preferences& preferences = Preferences::instance();
-        const int sortMode = trash ? preferences.trashSortMode() : preferences.sortMode();
+        const int sortMode = trash ? preferences.trashSortMode() : page ? page->viewOptions().sort : Preferences::Name;
         const auto sortItem = [&](const std::string& text, int mode) {
-            const size_t index = sort->addItem(text, [trash, mode] {
+            const size_t index = sort->addItem(text, [this, trash, mode] {
                 Preferences& preferences = Preferences::instance();
                 if (trash)
                     preferences.setTrashSort(mode, preferences.trashSortDesc());
-                else
-                    preferences.setSort(mode, preferences.sortDesc());
+                else if (auto* page = currentPage()) {
+                    auto options = page->viewOptions();
+                    options.sort = mode;
+                    page->setViewOptions(options);
+                }
             });
             sort->setItemChecked(index, sortMode == mode);
         };
+        if (!trash && page && page->viewMethod() == Preferences::Grid)
+            sortItem(tr("None"), Preferences::Manual);
         sortItem(tr("Name"), Preferences::Name);
         if (trash)
             sortItem(tr("Original Location"), Preferences::OriginalPath);
@@ -1442,13 +1465,18 @@ void FolderWindow::buildMainMenu()
             sortItem(tr("Date Accessed"), Preferences::AccessedTime);
         }
         sort->addSeparator();
-        const bool descending = trash ? preferences.trashSortDesc() : preferences.sortDesc();
-        const auto reverse = sort->addItem(tr("Descending"), [trash, sortMode, descending] {
+        const bool descending = trash ? preferences.trashSortDesc() : page && page->viewOptions().descending;
+        const auto reverse = sort->addItem(tr("Descending"), [this, trash, sortMode, descending] {
             auto& prefs = Preferences::instance();
             if (trash) prefs.setTrashSort(sortMode, !descending);
-            else prefs.setSort(sortMode, !descending);
+            else if (auto* page = currentPage()) {
+                auto options = page->viewOptions();
+                options.descending = !options.descending;
+                page->setViewOptions(options);
+            }
         });
         sort->setItemChecked(reverse, descending);
+        sort->setItemEnabled(reverse, sortMode != Preferences::Manual);
     };
 
     ui::Menu* go = m_mainMenu->addSubmenu(tr("Go"));
