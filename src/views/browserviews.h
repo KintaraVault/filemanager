@@ -4,6 +4,10 @@
 
 #include "core/fileitem.h"
 #include "views/folderview.h"
+#include "views/foldericon.h"
+#include "ui/image_info.h"
+
+#include <array>
 #include "base/thread_pool.h"
 
 #include <map>
@@ -36,14 +40,19 @@ private:
     bool m_inspector;
     FileItemPtr m_item;
     ui::ImageView* m_image;
-    ui::ThemeIcon* m_fallback;
+    FolderThemeIcon* m_fallback;
     ui::Label* m_title;
     ui::Label* m_metadata;
+    ui::Label* m_information;
+    ui::Label* m_quickActions;
+    std::array<ui::Label*, 4> m_detailLabels;
+    std::array<ui::Label*, 4> m_detailValues;
     ui::Label* m_excerpt;
     ui::DialogButton* m_primary;
     ui::DialogButton* m_info;
     ui::DialogButton* m_rotate;
     base::Job m_textJob;
+    ui::ImageInfo m_imageInfo;
     std::shared_ptr<bool> m_alive = std::make_shared<bool>(true);
     int m_turns = 0;
 };

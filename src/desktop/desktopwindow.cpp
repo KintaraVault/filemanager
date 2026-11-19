@@ -8,6 +8,7 @@
 #include "desktop/desktopview.h"
 #include "ops/operations.h"
 #include "views/foldermenu.h"
+#include "dialogs/folderappearancedialog.h"
 #include "views/folderwindow.h"
 #include "views/previewclient.h"
 #include "views/style.h"
@@ -356,7 +357,9 @@ void DesktopWindow::updateMainMenu()
 
 void DesktopWindow::showContextMenu(ui::PointF position)
 {
-    m_menu = createFolderMenu(*m_model);
+    m_menu = createFolderMenu(*m_model, [this](std::string path, std::string name) {
+        m_folderAppearance = showFolderAppearance(m_window.get(), std::move(path), std::move(name));
+    });
     m_menu->popup(m_window.get(), position);
 }
 

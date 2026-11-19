@@ -6,6 +6,7 @@
 #include "model/foldermodel.h"
 #include "desktop/desktopview.h"
 #include "views/folderwindow.h"
+#include "dialogs/folderappearancedialog.h"
 
 #include "base/event_loop.h"
 #include "base/paths.h"
@@ -103,6 +104,10 @@ int main(int argc, char** argv)
     bool dark = false;
     int mode = fm::Preferences::Grid;
     bool lateWorkArea = false;
+    bool inspector = false;
+    bool palette = false;
+    std::string appearance;
+    std::string branch;
     std::vector<std::string> select;
     for (int i = 6; i < argc; ++i) {
         const std::string argument = argv[i];
@@ -116,6 +121,14 @@ int main(int argc, char** argv)
             mode = fm::Preferences::Gallery;
         else if (argument == "late-work-area")
             lateWorkArea = true;
+        else if (argument == "inspector")
+            inspector = true;
+        else if (argument == "palette")
+            palette = true;
+        else if (argument.starts_with("appearance="))
+            appearance = argument.substr(11);
+        else if (argument.starts_with("branch="))
+            branch = argument.substr(7);
         else if (argument.starts_with("select="))
             select.push_back(argument.substr(7));
     }
@@ -126,12 +139,17 @@ int main(int argc, char** argv)
         return captureDesktop(app, output, width, height, scale, select, lateWorkArea);
     fm::Preferences::instance().setReadOnly(true);
     fm::Preferences::instance().setViewMethod(mode);
+    fm::Preferences::instance().setOption(fm::Preferences::PreviewPane, inspector);
 
     Host host;
     fm::FolderWindow window(&host, {folder, {}, {}, {}});
     window.window().setScale(scale);
     window.window().resize({width, height});
     window.show();
+    if (!appearance.empty()) {
+        auto dialog = fm::showFolderAppearance(&window.window(), folder + "/" + appearance, appearance);
+        return dialog->window()->grab().savePng(output) ? 0 : 1;
+    }
 
     base::Timer poll;
     int ticks = 0;
@@ -142,13 +160,21 @@ int main(int argc, char** argv)
     };
     poll.start(20ms);
     app.run();
+    const auto directory = branch.empty() ? folder : folder + "/" + branch;
+    if (!branch.empty() && window.currentPage()) {
+        window.currentPage()->model().setUrl(base::url::fromLocalFile(directory));
+        ticks = 0;
+        app.run();
+    }
 
     if (fm::FolderPage* page = window.currentPage()) {
         for (const std::string& name : select) {
-            const int row = page->model().rowForUrl(base::url::fromLocalFile(folder + "/" + name));
+            const int row = page->model().rowForUrl(base::url::fromLocalFile(directory + "/" + name));
             page->model().setSelected(row);
         }
     }
+    if (palette)
+        window.setToolbarEditing(true);
 
     // A headless window lays out only when grabbed; what it asks for then
     // (thumbnails, folder sizes) arrives from workers.

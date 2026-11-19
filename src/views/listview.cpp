@@ -3,6 +3,8 @@
 
 #include "views/colors.h"
 #include "views/listview.h"
+#include "views/foldericon.h"
+#include "core/filetags.h"
 #include "core/preferences.h"
 #include "core/dates.h"
 #include "core/thumbnails.h"
@@ -314,7 +316,7 @@ public:
     explicit ListRow(FolderListView* list)
         : m_list(list)
     {
-        m_icon = addChild<ui::IconImage>();
+        m_icon = addChild<FolderImageIcon>();
         m_thumbnail = addChild<ui::ImageView>();
         m_thumbnail->setFillMode(ui::ImageView::FillMode::PreserveAspectCrop);
         m_thumbnail->setVisible(false);
@@ -358,11 +360,12 @@ public:
         const bool dropTarget = m_list->isDropTarget(index);
         const bool dropAllowed = dropTarget && m_list->dropAllowed();
         const bool thumbnail = model.showsThumbnail(index);
+        const auto tags = item->isLocalFile() && !item->isLink ? filetags::read(item->path) : 0;
         // What the row's own layout and paint go by; its child views ask for theirs.
         const bool changed = index != m_index || item != m_item || selected != m_selected
                 || previousSelected != m_previousSelected || nextSelected != m_nextSelected
                 || dropTarget != m_dropTarget || dropAllowed != m_dropAllowed || thumbnail != m_wantsThumbnail
-                || c != m_boundColumns;
+                 || c != m_boundColumns || tags != m_tags;
         if (index != m_index) {
             m_index = index;
             m_imageKey.clear();
@@ -376,6 +379,7 @@ public:
         m_dropAllowed = dropAllowed;
         m_wantsThumbnail = thumbnail;
         m_boundColumns = c;
+        m_tags = tags;
 
         const ui::Theme& theme = ui::Theme::current();
         const ui::Color primary = m_selected ? style::selectedTextColor() : theme.text;
@@ -387,6 +391,7 @@ public:
             icon = item->isDir ? "folder" : "unknown";
         if (icon != m_icon->name())
             m_icon->setName(icon);
+        m_icon->setFolderPath(item->isDir && !item->isLink && item->isLocalFile() ? item->path : std::string());
         m_emblem->setVisible(item->isLink);
         m_name->setText(model.displayName(index));
         if (m_list->hasDisclosure()) {
@@ -447,7 +452,8 @@ protected:
         m_branch->setGeometry({geometry().width - 15, centeredStart(height, 12), 12, 12});
         const double nameRight = c.nameWidth() - c.cellPadding - (branch ? 8 : 0);
         const ui::SizeF nameHint = m_name->sizeHint();
-        m_name->setGeometry({nameX, centeredStart(height, nameHint.height), std::max(0.0, nameRight - nameX),
+        const double reserved = m_tags ? 25 : 0;
+        m_name->setGeometry({nameX, centeredStart(height, nameHint.height), std::max(0.0, nameRight - nameX - reserved),
                              nameHint.height});
 
         const std::pair<double, double> cells[] = {
@@ -484,32 +490,43 @@ protected:
             fill = theme.highlight;
         else if (!m_boundColumns.compact && m_index % 2 == 1)
             fill = ui::color(FmColor::AlternateRow);
-        if (fill.a == 0)
-            return;
-
-        // Adjacent selected rows read as one block: only the outer corners round.
-        ui::Path path;
-        const double top = m_previousSelected ? 0 : radius;
-        const double bottom = m_nextSelected ? 0 : radius;
-        const double x = rect.x;
-        const double y = rect.y;
-        const double w = rect.width;
-        const double h = rect.height;
-        path.moveTo(x + top, y);
-        path.lineTo(x + w - top, y);
-        if (top > 0)
-            path.arcTo({x + w - 2 * top, y, 2 * top, 2 * top}, 90, -90);
-        path.lineTo(x + w, y + h - bottom);
-        if (bottom > 0)
-            path.arcTo({x + w - 2 * bottom, y + h - 2 * bottom, 2 * bottom, 2 * bottom}, 0, -90);
-        path.lineTo(x + bottom, y + h);
-        if (bottom > 0)
-            path.arcTo({x, y + h - 2 * bottom, 2 * bottom, 2 * bottom}, 270, -90);
-        path.lineTo(x, y + top);
-        if (top > 0)
-            path.arcTo({x, y, 2 * top, 2 * top}, 180, -90);
-        path.close();
-        painter.fillPath(path, fill);
+        if (fill.a != 0) {
+            // Adjacent selected rows read as one block: only the outer corners round.
+            ui::Path path;
+            const double top = m_previousSelected ? 0 : radius;
+            const double bottom = m_nextSelected ? 0 : radius;
+            const double x = rect.x;
+            const double y = rect.y;
+            const double w = rect.width;
+            const double h = rect.height;
+            path.moveTo(x + top, y);
+            path.lineTo(x + w - top, y);
+            if (top > 0)
+                path.arcTo({x + w - 2 * top, y, 2 * top, 2 * top}, 90, -90);
+            path.lineTo(x + w, y + h - bottom);
+            if (bottom > 0)
+                path.arcTo({x + w - 2 * bottom, y + h - 2 * bottom, 2 * bottom, 2 * bottom}, 0, -90);
+            path.lineTo(x + bottom, y + h);
+            if (bottom > 0)
+                path.arcTo({x, y + h - 2 * bottom, 2 * bottom, 2 * bottom}, 270, -90);
+            path.lineTo(x, y + top);
+            if (top > 0)
+                path.arcTo({x, y, 2 * top, 2 * top}, 180, -90);
+            path.close();
+            painter.fillPath(path, fill);
+        }
+        if (m_tags) {
+            const auto text = m_name->geometry();
+            const double x = text.x + std::min(text.width, m_name->sizeHint().width) + 6;
+            int dots = 0;
+            for (size_t i = 0; i < filetags::colors.size() && dots < 3; ++i) {
+                if (m_tags & (1u << i)) {
+                    const ui::RectF dot{x + 6 * dots++, (rect.height - 7) / 2, 7, 7};
+                    painter.drawSmoothRectangle(dot, 3.5, ui::Color::rgb(filetags::colors[i]), 1,
+                        (m_selected ? style::selectedTextColor() : theme.text).withAlpha(0.35));
+                }
+            }
+        }
     }
 
 private:
@@ -609,7 +626,8 @@ private:
     ui::SizeF m_thumbnailBox;
     ui::SizeF m_thumbnailRequest;
     ui::Bitmap m_image;
-    ui::IconImage* m_icon;
+    FolderImageIcon* m_icon;
+    uint8_t m_tags = 0;
     ui::ImageView* m_thumbnail;
     ui::ThemeIcon* m_emblem;
     ui::Label* m_name;

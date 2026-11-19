@@ -8,6 +8,7 @@
 #include "views/folderview.h"
 #include "dialogs/archivepasswordprompt.h"
 #include "views/foldermenu.h"
+#include "dialogs/folderappearancedialog.h"
 #include "views/gridview.h"
 #include "views/pathbar.h"
 #include "views/sidebar.h"
@@ -306,6 +307,7 @@ public:
         items = {{"views", tr("View"), "grid", 124, [this](ui::Toolbar& owner) -> ui::View* {
             auto* control = owner.addChild<ui::SegmentedControl>(viewNames());
             control->setName("viewModeControl");
+            control->setToolbarAppearance(true);
             const bool labels = owner.display() == ui::Toolbar::Display::IconsAndText;
             control->setContentHeight(labels ? 32 : 26);
             control->setFontSize(10);
@@ -313,7 +315,8 @@ public:
             control->onCurrentChanged = [](int index) { Preferences::instance().setViewMethod(kViews.at(size_t(index))); };
             control->setCurrentIndex(viewIndex());
             return control;
-        }}, {"group", tr("Group"), "view-group"}, {"share", tr("Share"), "share"}, {"tags", tr("Tags"), "tag"},
+        }, {"grid", "list", "view-columns", "view-gallery"}}, {"group", tr("Group"), "view-group", 39, {}, {}, true},
+                  {"share", tr("Share"), "share"}, {"tags", tr("Tags"), "tag"},
                  {"action", tr("Action"), "ellipsis"}, {"search", tr("Search"), "search"},
                  {"info", tr("Get Info"), "info"}, {"quicklook", tr("Quick Look"), "image"},
                  {"preview", tr("Preview"), "sidebar"}, {"newfolder", tr("New Folder"), "folder"}};
@@ -366,15 +369,15 @@ public:
     explicit ToolbarPalette(HeaderRow& header)
     {
         setName("toolbarCustomizationPalette");
-        m_title = addChild<ui::Label>(tr("Customize Toolbar"));
-        m_title->setWeight(650);
-        m_help = addChild<ui::Label>(tr("Drag items to the toolbar or rearrange the items already there."));
+        m_help = addChild<ui::Label>(tr("Drag your favorite items into the toolbar…"));
         m_help->setWrap(true);
         for (const auto& item : header.items)
             m_items.push_back(header.toolbar->makePaletteItem(*this, item.id, item.label, item.glyph));
         m_items.push_back(header.toolbar->makePaletteItem(*this, ui::Toolbar::Space, tr("Space"), ""));
         m_items.push_back(header.toolbar->makePaletteItem(*this, ui::Toolbar::FlexibleSpace, tr("Flexible Space"), ""));
         m_default = header.toolbar->makePaletteItem(*this, ui::Toolbar::DefaultSet, tr("Default Set"), "");
+        m_resetHint = addChild<ui::Label>(tr("…or drag the default set into the toolbar."));
+        m_resetHint->setWrap(true);
         done = addChild<ui::DialogButton>(tr("Done"));
     }
     ui::DialogButton* done;
@@ -384,12 +387,13 @@ protected:
     void layout() override
     {
         const double width = geometry().width;
-        m_title->setGeometry({18, 13, width - 36, 23});
-        m_help->setGeometry({18, 38, width - 36, 39});
+        m_help->setGeometry({18, 14, width - 36, 38});
+        const int columns = width >= 570 ? 6 : 4;
         for (size_t i = 0; i < m_items.size(); ++i) {
-            const double cell = (width - 36) / 4;
-            m_items[i]->setGeometry({18 + cell * (i % 4), 83 + 44.0 * (i / 4), cell - 5, 36});
+            const double cell = (width - 36) / columns;
+            m_items[i]->setGeometry({18 + cell * (i % columns), 55 + 46.0 * (i / columns), cell - 5, 40});
         }
+        m_resetHint->setGeometry({18, geometry().height - 82, width - 36, 29});
         m_default->setGeometry({18, geometry().height - 50, width - 132, 32});
         done->setGeometry({width - 94, geometry().height - 50, 76, 32});
     }
@@ -399,8 +403,8 @@ protected:
     }
 
 private:
-    ui::Label* m_title;
     ui::Label* m_help;
+    ui::Label* m_resetHint;
     std::vector<ui::View*> m_items;
     ui::View* m_default;
 };
@@ -500,8 +504,8 @@ protected:
 
         header->setGeometry({0, 0, width, FolderWindow::kHeaderInset});
         if (palette) {
-            const double panelWidth = std::min(540.0, width - 24);
-            palette->setGeometry({(width - panelWidth) / 2, FolderWindow::kHeaderInset + 4, panelWidth, 278});
+            const double panelWidth = std::min(750.0, width - 24);
+            palette->setGeometry({(width - panelWidth) / 2, FolderWindow::kHeaderInset + 4, panelWidth, 284});
         }
         m_window->updateBlur();
     }
@@ -1046,7 +1050,9 @@ void FolderWindow::showContextMenu(ui::PointF position)
     FolderPage* page = currentPage();
     if (!page)
         return;
-    m_menu = createFolderMenu(page->model());
+    m_menu = createFolderMenu(page->model(), [this](std::string path, std::string name) {
+        m_folderAppearance = showFolderAppearance(m_window.get(), std::move(path), std::move(name));
+    });
     m_menu->addSeparator();
     const auto quick = m_menu->addItem(tr("Quick Look"), [this] { if (auto* p = currentPage()) p->quickLook(); });
     m_menu->setItemEnabled(quick, page->model().hasSelection());

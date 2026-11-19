@@ -71,6 +71,7 @@ public:
     void moveTab(int from, int to);
     void show();
     void close();
+    void setToolbarEditing(bool editing);
 
     // FolderModelHost.
     void openFolders(const std::vector<std::string>& paths) override;
@@ -108,7 +109,6 @@ private:
     void updateTabBar();
     void showContextMenu(ui::PointF position);
     void toolbarAction(const std::string& id, ui::PointF position);
-    void setToolbarEditing(bool editing);
     void populateViewOptions(ui::Menu& menu);
     void populateGrouping(ui::Menu& menu);
     void populateSidebarSettings(ui::Menu& menu);
@@ -139,6 +139,7 @@ private:
     bool m_incoming = false;
     bool m_closed = false;
     std::unique_ptr<ui::Menu> m_menu;
+    std::unique_ptr<class FramelessDialog> m_folderAppearance;
     std::unique_ptr<ui::Toast> m_toast;
     std::unique_ptr<ui::AboutDialog> m_aboutDialog;
     std::unique_ptr<class ArchivePasswordPrompt> m_archivePassword;

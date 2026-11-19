@@ -6,6 +6,7 @@
 #include "core/common.h"
 
 #include <memory>
+#include <functional>
 #include <string>
 
 namespace cutefish::ui {
@@ -21,6 +22,7 @@ void triggerAction(FolderModel& model, const std::string& name);
 
 // The folder's menu without a selection, the
 // selection's with one. The model's actions are prepared first.
-std::unique_ptr<ui::Menu> createFolderMenu(FolderModel& model);
+using CustomizeFolder = std::function<void(std::string path, std::string name)>;
+std::unique_ptr<ui::Menu> createFolderMenu(FolderModel& model, CustomizeFolder customizeFolder = {});
 
 } // namespace fm

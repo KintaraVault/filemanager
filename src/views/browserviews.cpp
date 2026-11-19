@@ -31,6 +31,7 @@
 namespace fm {
 
 using cutefish::i18n::tr;
+using cutefish::i18n::trNoop;
 
 static std::string iconFor(const FileItem& item)
 {
@@ -43,10 +44,11 @@ FilePreviewPane::FilePreviewPane(bool inspector)
 {
     setName(inspector ? "previewInspector" : "galleryPreview");
     setClipsChildren(true);
-    m_fallback = addChild<ui::ThemeIcon>("unknown", 84);
+    m_fallback = addChild<FolderThemeIcon>("unknown", 84);
     m_image = addChild<ui::ImageView>();
     m_image->setFillMode(ui::ImageView::FillMode::PreserveAspectFit);
     m_image->setAutoTransform(true);
+    m_image->setCornerRadius(5);
     m_image->onStatusChanged = [this](ui::ImageView::Status) { updateMetadata(); requestLayout(); };
     m_title = addChild<ui::Label>();
     m_title->setTextAlignment(ui::Label::TextAlignment::Center);
@@ -55,6 +57,18 @@ FilePreviewPane::FilePreviewPane(bool inspector)
     m_metadata = addChild<ui::Label>();
     m_metadata->setWrap(true);
     m_metadata->setColor(ui::ColorId::DisabledText);
+    m_information = addChild<ui::Label>(tr("Information"));
+    m_information->setWeight(650);
+    m_quickActions = addChild<ui::Label>(tr("Quick Actions"));
+    m_quickActions->setWeight(650);
+    const char* detailNames[] = {trNoop("Created"), trNoop("Modified"), trNoop("Last Accessed"), trNoop("Dimensions")};
+    for (size_t i = 0; i < m_detailLabels.size(); ++i) {
+        m_detailLabels[i] = addChild<ui::Label>(tr(detailNames[i]));
+        m_detailLabels[i]->setColor(ui::ColorId::DisabledText);
+        m_detailValues[i] = addChild<ui::Label>();
+        m_detailValues[i]->setTextAlignment(ui::Label::TextAlignment::Right);
+        m_detailValues[i]->setElide(ui::Label::Elide::Right);
+    }
     m_excerpt = addChild<ui::Label>();
     m_excerpt->setFontFamily("monospace");
     m_excerpt->setWrap(true);
@@ -101,6 +115,7 @@ void FilePreviewPane::setItem(FileItemPtr item, std::string name)
         return;
     m_textJob.cancel();
     m_item = std::move(item);
+    m_imageInfo = {};
     m_excerpt->setText({});
     m_turns = 0;
     m_image->setQuarterTurns(0);
@@ -110,8 +125,19 @@ void FilePreviewPane::setItem(FileItemPtr item, std::string name)
     const bool local = m_item && m_item->isLocalFile() && m_item->isFile && !thumbnails::isOnMount(m_item->path);
     if (m_item)
         m_fallback->setIconName(iconFor(*m_item));
+    m_fallback->setFolderPath(m_item && m_item->isDir && !m_item->isLink && m_item->isLocalFile() ? m_item->path : std::string());
     if (local && m_item->mimeType.starts_with("image/")) {
         m_image->setSource(m_item->path);
+        if (m_inspector) {
+            m_textJob = base::ThreadPool::global().run([item = m_item] { return ui::readImageInfo(item->path, item->mimeType); },
+                [this, alive = m_alive, item = m_item](ui::ImageInfo info) {
+                    if (*alive && item == m_item) {
+                        m_imageInfo = info;
+                        updateMetadata();
+                        requestLayout();
+                    }
+                });
+        }
     } else if (local && m_item->mimeType.starts_with("text/")) {
         m_textJob = base::ThreadPool::global().run([path = m_item->path] { return textExcerpt(path); },
                 [this, alive = m_alive, item = m_item](std::string text) {
@@ -136,20 +162,18 @@ void FilePreviewPane::updateMetadata()
 {
     if (!m_item) {
         m_metadata->setText({});
+        for (auto* value : m_detailValues)
+            value->setText({});
         return;
     }
     std::string text = m_item->isDir ? tr("Folder") : m_item->typeDescription.empty() ? m_item->mimeType : m_item->typeDescription;
     if (!m_item->isDir)
         text += " · " + formatSize(m_item->size);
-    if (m_inspector) {
-        const auto date = [&](const char* label, int64_t value) {
-            if (value > 0)
-                text += '\n' + std::string(tr(label)) + "  " + dates::columnTime(value);
-        };
-        date("Created:", m_item->created);
-        date("Modified:", m_item->modified);
-        date("Last accessed:", m_item->accessed);
-    }
+    const int64_t times[] = {m_item->created, m_item->modified, m_item->accessed};
+    for (size_t i = 0; i < 3; ++i)
+        m_detailValues[i]->setText(times[i] > 0 ? dates::columnTime(times[i]) : std::string());
+    m_detailValues[3]->setText(m_imageInfo.width > 0 && m_imageInfo.height > 0
+        ? std::to_string(m_imageInfo.width) + " × " + std::to_string(m_imageInfo.height) : std::string());
     m_metadata->setText(std::move(text));
 }
 
@@ -160,10 +184,10 @@ void FilePreviewPane::layout()
     const double width = std::max(0.0, box.width - 2 * margin);
     const bool image = m_item && m_image->status() == ui::ImageView::Status::Ready;
     const bool excerpt = m_item && !m_excerpt->text().empty();
-    const double heroHeight = std::max(0.0, m_inspector ? std::min(240.0, box.height * 0.46) : box.height - 52);
+    const double heroHeight = std::max(0.0, m_inspector ? std::min(260.0, box.height * 0.45) : box.height - 52);
     const double iconSize = std::max(0.0, std::min({m_inspector ? 88.0 : 132.0, width, heroHeight}));
     m_image->setVisible(m_item != nullptr);
-    m_image->setGeometry({margin, 8, width, std::max(0.0, heroHeight - 8)});
+    m_image->setGeometry({margin, 16, width, std::max(0.0, heroHeight - 22)});
     m_fallback->setVisible(m_item && !image && !excerpt);
     m_fallback->setGeometry({(box.width - iconSize) / 2, (heroHeight - iconSize) / 2, iconSize, iconSize});
     m_excerpt->setVisible(excerpt);
@@ -171,11 +195,33 @@ void FilePreviewPane::layout()
     m_excerpt->setMaximumLineCount(std::max(1, int((heroHeight - 8) / 15)));
     m_excerpt->setGeometry({margin, 8, width, std::max(0.0, heroHeight - 8)});
     const double y = m_item ? heroHeight : box.height / 2 - 11;
+    m_title->setTextAlignment(m_inspector && m_item ? ui::Label::TextAlignment::Left : ui::Label::TextAlignment::Center);
+    m_title->setFontSize(m_inspector && m_item ? 15 : 13);
     m_title->setGeometry({margin, y, width, 22});
     const double metadata = m_metadata->heightForWidth(width);
     m_metadata->setGeometry({margin, y + 23, width, metadata});
     m_metadata->setTextAlignment(m_inspector ? ui::Label::TextAlignment::Left : ui::Label::TextAlignment::Center);
-    const double actions = y + 30 + metadata;
+    double actions = y + 34 + metadata;
+    const bool details = m_inspector && m_item;
+    bool heading = false;
+    for (size_t i = 0; i < m_detailValues.size(); ++i) {
+        const bool shown = details && !m_detailValues[i]->text().empty();
+        m_detailLabels[i]->setVisible(shown);
+        m_detailValues[i]->setVisible(shown);
+        if (!shown) continue;
+        if (!heading) {
+            m_information->setGeometry({margin, actions, width, 20});
+            actions += 23;
+            heading = true;
+        }
+        m_detailLabels[i]->setGeometry({margin, actions, width * 0.38, 21});
+        m_detailValues[i]->setGeometry({margin + width * 0.38, actions, width * 0.62, 21});
+        actions += 21;
+    }
+    m_information->setVisible(heading);
+    m_quickActions->setVisible(details && actions + 58 <= box.height);
+    m_quickActions->setGeometry({margin, actions + 7, width, 20});
+    if (m_quickActions->isVisible()) actions += 31;
     m_primary->setText(m_item && m_item->isDir ? tr("Open") : tr("Quick Look"));
     m_primary->setVisible(m_inspector && m_item && actions + 24 <= box.height);
     m_info->setVisible(m_primary->isVisible());
@@ -200,9 +246,10 @@ class Filmstrip::Tile : public ui::View
 public:
     Tile()
     {
-        m_icon = addChild<ui::ThemeIcon>();
+        m_icon = addChild<FolderThemeIcon>();
         m_photo = addChild<ui::ImageView>();
         m_photo->setFillMode(ui::ImageView::FillMode::PreserveAspectFit);
+        m_photo->setCornerRadius(4);
         m_photo->setThumbnail(true);
         m_photo->onStatusChanged = [this](ui::ImageView::Status status) { m_icon->setVisible(status != ui::ImageView::Status::Ready); };
         m_name = addChild<ui::Label>();
@@ -216,6 +263,7 @@ public:
         if (m_item != item) {
             m_item = item;
             m_icon->setIconName(iconFor(*item));
+            m_icon->setFolderPath(item->isDir && !item->isLink && item->isLocalFile() ? item->path : std::string());
             m_photo->setSource(thumbnail && item->mimeType.starts_with("image/") ? item->path : std::string());
         }
         m_name->setText(std::move(name));
@@ -237,15 +285,15 @@ protected:
     void paint(ui::Painter& painter) override
     {
         const auto r = localRect();
-        painter.drawSmoothRectangle({1, 2, r.width - 2, 60}, 7,
-                m_selected ? ui::Theme::current().highlight.withAlpha(0.23) : style::textAlpha(0.035));
+        if (m_selected)
+            painter.drawSmoothRectangle({1, 2, r.width - 2, 60}, 7, style::textAlpha(0.13));
         if (m_selected && m_name->isVisible())
             painter.drawSmoothRectangle({1, 59, r.width - 2, 17}, 5, ui::Theme::current().highlight);
     }
 
 private:
     FileItemPtr m_item;
-    ui::ThemeIcon* m_icon;
+    FolderThemeIcon* m_icon;
     ui::ImageView* m_photo;
     ui::Label* m_name;
     bool m_selected = false;

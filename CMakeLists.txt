@@ -106,6 +106,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.cutefish.FileOperations.service
 # through the daemon. No UI beyond the clipboard.
 # ---------------------------------------------------------------------------
 add_library(fm-core STATIC
+    src/core/folderappearance.cpp
     src/core/config.cpp
     src/core/dates.cpp
     src/core/fileitem.cpp
@@ -131,6 +132,8 @@ target_link_libraries(fm-core PUBLIC Cutefish::Toolkit Cutefish::Files Cutefish:
 
 # The browser window, its views and dialogs.
 add_library(fm-ui STATIC
+    src/views/foldericon.cpp
+    src/dialogs/folderappearancedialog.cpp
     src/views/colors.cpp
     src/views/completionpopup.cpp
     src/views/foldermenu.cpp

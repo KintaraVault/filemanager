@@ -794,6 +794,75 @@ msgstr "Создан:"
 msgid "Modified:"
 msgstr "Изменен:"
 
+msgid "Customize Folder"
+msgstr "Оформление папки"
+
+msgid "Customize Folder…"
+msgstr "Настроить вид папки…"
+
+msgid "Default Color"
+msgstr "Цвет по умолчанию"
+
+msgid "Custom Color"
+msgstr "Свой цвет"
+
+msgid "Search Symbols"
+msgstr "Поиск символов"
+
+msgid "People"
+msgstr "Люди"
+
+msgid "Animals & Nature"
+msgstr "Животные и природа"
+
+msgid "Travel & Places"
+msgstr "Путешествия и места"
+
+msgid "Objects"
+msgstr "Предметы"
+
+msgid "Emoji"
+msgstr "Эмодзи"
+
+msgid "Symbols"
+msgstr "Символы"
+
+msgid "Clear"
+msgstr "Очистить"
+
+msgid "Apply"
+msgstr "Применить"
+
+msgid "Enter a color as #RRGGBB."
+msgstr "Введите цвет в формате #RRGGBB."
+
+msgid "Could not change the folder appearance. Check permissions and filesystem support."
+msgstr "Не удалось изменить вид папки. Проверьте права доступа и поддержку файловой системой."
+
+msgid "Information"
+msgstr "Информация"
+
+msgid "Quick Actions"
+msgstr "Быстрые действия"
+
+msgid "Created"
+msgstr "Создание"
+
+msgid "Modified"
+msgstr "Изменение"
+
+msgid "Last Accessed"
+msgstr "Последний доступ"
+
+msgid "Dimensions"
+msgstr "Размеры"
+
+msgid "Drag your favorite items into the toolbar…"
+msgstr "Перетащите нужные элементы на панель инструментов…"
+
+msgid "…or drag the default set into the toolbar."
+msgstr "…или перетащите на панель набор по умолчанию."
+
 #: src/dialogs/propertiesdialog.cpp
 msgid "Accessed:"
 msgstr "Открыт:"

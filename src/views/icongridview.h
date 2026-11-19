@@ -5,6 +5,7 @@
 
 #include "core/fileitem.h"
 #include "views/folderview.h"
+#include "views/foldericon.h"
 
 #include "ui/bitmap.h"
 #include "ui/view.h"
@@ -104,7 +105,7 @@ protected:
     bool m_selected = false;
     bool m_hidden = false;
     ui::RectF m_iconItem;
-    ui::ThemeIcon* m_icon = nullptr;
+    FolderThemeIcon* m_icon = nullptr;
     ui::ImageView* m_thumbnail = nullptr;
     ui::ThemeIcon* m_overlay = nullptr;
     ui::Label* m_label = nullptr;

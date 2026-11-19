@@ -22,6 +22,7 @@
 #include "ui/cell_layout.h"
 #include "ui/text_area.h"
 #include "ui/theme.h"
+#include "views/foldericon.h"
 #include "ui/window.h"
 #include "ui/window_header.h"
 #include "ui/zoomable_image_view.h"
@@ -258,7 +259,7 @@ class PreviewCard : public ui::View
 public:
     PreviewCard()
     {
-        icon = addChild<ui::ThemeIcon>(std::string(), 96);
+        icon = addChild<FolderThemeIcon>(std::string(), 96);
         icon->setImageProviderLookup(true);
         name = addChild<ui::Label>();
         name->setWeight(700);
@@ -270,6 +271,7 @@ public:
     void setFile(const PreviewFile& file)
     {
         icon->setIconName(file.icon.empty() ? "application-octet-stream" : file.icon);
+        icon->setFolderPath(file.folder ? base::url::toLocalFile(file.url).value_or(std::string()) : std::string());
         name->setText(file.name);
         if (file.folder) {
             const std::string count = trn("{n} item", "{n} items", file.itemCount);
@@ -281,7 +283,7 @@ public:
         requestLayout();
     }
 
-    ui::ThemeIcon* icon;
+    FolderThemeIcon* icon;
     ui::Label* name;
     ui::Label* detail;
 

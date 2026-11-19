@@ -48,7 +48,7 @@ void triggerAction(FolderModel& model, const std::string& name)
         found->second(model);
 }
 
-std::unique_ptr<ui::Menu> createFolderMenu(FolderModel& model)
+std::unique_ptr<ui::Menu> createFolderMenu(FolderModel& model, CustomizeFolder customizeFolder)
 {
     model.prepareContextMenu();
     auto menu = std::make_unique<ui::Menu>();
@@ -164,6 +164,19 @@ std::unique_ptr<ui::Menu> createFolderMenu(FolderModel& model)
     item("wallpaper", selection);
     separator(model.action("properties").visible);
     item("properties", true);
+    if (customizeFolder && !model.isTrash()) {
+        const auto selected = model.selectedRows();
+        if (selected.size() == 1) {
+            const auto folder = model.item(selected.front());
+            if (folder && folder->isDir && !folder->isLink && folder->isLocalFile()) {
+                menu->addSeparator();
+                menu->addItem(tr("Customize Folder…"), [customize = std::move(customizeFolder),
+                                  path = folder->path, name = model.displayName(selected.front())] {
+                    customize(path, name);
+                });
+            }
+        }
+    }
     return menu;
 }
 

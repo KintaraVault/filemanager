@@ -76,6 +76,7 @@ private:
     DesktopGridView* m_view = nullptr;
     std::unique_ptr<PreviewClient> m_preview;
     std::unique_ptr<ui::Menu> m_menu;
+    std::unique_ptr<class FramelessDialog> m_folderAppearance;
     std::unique_ptr<class ArchivePasswordPrompt> m_archivePassword;
     std::string m_output;
     bool m_layoutLoaded = false;

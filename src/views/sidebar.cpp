@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "views/sidebar.h"
+#include "views/foldericon.h"
 #include "core/preferences.h"
 #include "core/filetags.h"
 #include "dialogs/serverdialogs.h"
@@ -171,7 +172,7 @@ public:
         }
         while (m_rows.size() < size_t(places.count())) {
             Row row;
-            row.icon = addChild<ui::ThemeIcon>(std::string(), 20);
+            row.icon = addChild<FolderThemeIcon>(std::string(), 20);
             row.icon->setThemeSize(20);
             row.label = addChild<ui::Label>();
             row.label->setElide(ui::Label::Elide::Right);
@@ -209,7 +210,7 @@ public:
 protected:
     struct Row
     {
-        ui::ThemeIcon* icon = nullptr;
+        FolderThemeIcon* icon = nullptr;
         ui::Label* label = nullptr;
         ui::ThemeIcon* eject = nullptr;
         ui::Label* section = nullptr;
@@ -295,6 +296,7 @@ protected:
             const bool checked = i == m_selected;
             const ui::Color color = !active ? theme.disabledText : checked ? theme.highlight : theme.text;
             row.icon->setIconName(place.iconName);
+            row.icon->setFolderPath(!place.isDevice() ? base::url::toLocalFile(place.url).value_or(std::string()) : std::string());
             row.icon->setColor(color);
             const double iconX = snap(inset + kSmallSpacing);
             const double iconSize = snap(20);

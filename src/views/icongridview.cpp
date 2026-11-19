@@ -147,7 +147,8 @@ IconItem::IconItem(IconGridView* view, double selectionHPadding, double selectio
 
 void IconItem::addIconViews()
 {
-    m_icon = addChild<ui::ThemeIcon>();
+    m_icon = addChild<FolderThemeIcon>();
+    m_icon->appearanceChanged = [this] { requestLayout(); };
     m_thumbnail = addChild<ui::ImageView>();
     m_thumbnail->setFillMode(ui::ImageView::FillMode::PreserveAspectCrop);
     m_thumbnail->setVisible(false);
@@ -198,6 +199,7 @@ void IconItem::bind(int index, int row)
         changed = true;
     }
     m_icon->setSize(iconSize);
+    m_icon->setFolderPath(item->isDir && !item->isLink && item->isLocalFile() ? item->path : std::string());
     m_overlay->setSize(iconSize);
     m_overlay->setColor(ui::Theme::current().highlight);
 
@@ -272,7 +274,7 @@ void IconItem::layoutIcon(const ui::RectF& iconItem, double emblemSize)
     layoutThumbnail();
     const bool thumbnailShown = m_thumbnail->isVisible();
     m_icon->setVisible(!thumbnailShown);
-    m_overlay->setVisible(m_selected && !thumbnailShown);
+    m_overlay->setVisible(m_selected && !thumbnailShown && !m_icon->customized());
 
     const ui::RectF anchor = thumbnailShown ? m_thumbnail->geometry() : iconRect;
     m_emblem->setSize(emblemSize);
