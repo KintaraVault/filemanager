@@ -121,6 +121,7 @@ int main(int argc, char** argv)
     bool palette = false;
     bool options = false;
     bool share = false;
+    int toolbarDisplay = 0;
     std::string appearance;
     std::string branch;
     std::vector<std::string> select;
@@ -144,6 +145,10 @@ int main(int argc, char** argv)
             options = true;
         else if (argument == "share")
             share = true;
+        else if (argument == "toolbar-labels")
+            toolbarDisplay = 1;
+        else if (argument == "toolbar-text")
+            toolbarDisplay = 2;
         else if (argument.starts_with("appearance="))
             appearance = argument.substr(11);
         else if (argument.starts_with("branch="))
@@ -158,6 +163,7 @@ int main(int argc, char** argv)
         return captureDesktop(app, output, width, height, scale, select, lateWorkArea);
     fm::Preferences::instance().setReadOnly(true);
     fm::Preferences::instance().setViewMethod(mode);
+    fm::Preferences::instance().setToolbarDisplay(toolbarDisplay);
     fm::Preferences::instance().setOption(fm::Preferences::PreviewPane, inspector);
 
     Host host;

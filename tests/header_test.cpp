@@ -15,9 +15,11 @@
 #include "base/url.h"
 #include "ui/application.h"
 #include "ui/clipboard.h"
+#include "ui/combo_box.h"
 #include "ui/keys.h"
 #include "ui/label.h"
 #include "ui/menu.h"
+#include "ui/segmented_control.h"
 #include "ui/test_input.h"
 #include "ui/text_area.h"
 #include "ui/toolbar.h"
@@ -70,6 +72,61 @@ static void dragBy(ui::Window& window, ui::PointF from, ui::PointF delta)
     ui::TestInput::press(window, from);
     ui::TestInput::movePointer(window, to);
     ui::TestInput::release(window, to);
+}
+
+TEST(HeaderTest, TahoeToolbarGroupsActionsAndRestylesWithoutChangingTheirTargets)
+{
+    auto& prefs = fm::Preferences::instance();
+    struct Restore {
+        fm::Preferences& prefs;
+        std::vector<std::string> order;
+        int display;
+        ~Restore() { prefs.setToolbarOrder(order); prefs.setToolbarDisplay(display); }
+    } restore {prefs, prefs.toolbarOrder(), prefs.toolbarDisplay()};
+    prefs.setToolbarOrder(fm::Preferences::defaultToolbar());
+    prefs.setToolbarDisplay(0);
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    WindowHost host;
+    fm::FolderWindow browser(&host, {directory.path(), {}, {}, {}}, {1050, 720});
+    browser.show();
+    auto& window = browser.window();
+    window.grab();
+    auto* root = window.contentView();
+    auto* toolbar = dynamic_cast<ui::Toolbar*>(findView(root, "toolbar"));
+    ASSERT_TRUE(toolbar);
+    auto* share = toolbar->itemView("share");
+    auto* tags = toolbar->itemView("tags");
+    auto* action = toolbar->itemView("action");
+    auto* group = toolbar->itemView("group");
+    ASSERT_TRUE(share && tags && action && group);
+    EXPECT_EQ(share->geometry().right(), tags->geometry().x);
+    EXPECT_EQ(tags->geometry().right(), action->geometry().x);
+    EXPECT_LT(group->geometry().right(), share->geometry().x);
+
+    auto* views = dynamic_cast<ui::SegmentedControl*>(findView(root, "viewModeControl"));
+    ASSERT_TRUE(views);
+    ui::TestInput::click(window, views->mapToWindow({83, 15}));
+    EXPECT_EQ(browser.currentPage()->viewMethod(), fm::Preferences::Columns);
+
+    browser.setToolbarEditing(true);
+    window.grab();
+    auto* picker = dynamic_cast<ui::ComboBox*>(findView(root, "toolbarDisplayPicker"));
+    ASSERT_TRUE(picker && picker->onActivated);
+    picker->onActivated(1);
+    ASSERT_TRUE(runUntil(s_app->loop(), [&] { return toolbar->display() == ui::Toolbar::Display::IconsAndText; }));
+    EXPECT_EQ(picker->currentIndex(), 1);
+    browser.setToolbarEditing(false);
+    window.grab();
+    views = dynamic_cast<ui::SegmentedControl*>(findView(root, "viewModeControl"));
+    ASSERT_TRUE(views);
+    EXPECT_EQ(views->currentIndex(), 2);
+    EXPECT_EQ(views->localRect().height, 40);
+
+    prefs.setToolbarOrder({"share", ui::Toolbar::Space, "tags", "action"});
+    ASSERT_TRUE(runUntil(s_app->loop(), [&] { return toolbar->order() == prefs.toolbarOrder(); }));
+    window.grab();
+    EXPECT_LT(toolbar->itemView("share")->geometry().right(), toolbar->itemView("tags")->geometry().x);
 }
 
 TEST(HeaderTest, SharePopoverShowsSelectionAndCopiesIt)

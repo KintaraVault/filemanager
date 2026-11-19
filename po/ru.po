@@ -1543,3 +1543,12 @@ msgstr "Поделиться"
 
 msgid "Copy Location"
 msgstr "Копировать путь"
+
+msgid "Back/Forward"
+msgstr "Назад/вперёд"
+
+msgid "Add Tags"
+msgstr "Добавить теги"
+
+msgid "Show:"
+msgstr "Показывать:"

@@ -22,6 +22,7 @@
 #include "ui/about_dialog.h"
 #include "ui/application.h"
 #include "ui/color_provider.h"
+#include "ui/combo_box.h"
 #include "ui/drop_down_popup.h"
 #include "ui/progress_bar.h"
 #include "ui/dialog_window.h"
@@ -56,6 +57,11 @@ namespace fm {
 using ui::rounding::centeredStart;
 using cutefish::i18n::format;
 using cutefish::i18n::tr;
+
+static std::vector<std::string> toolbarDisplays()
+{
+    return {tr("Icon Only"), tr("Icon and Text"), tr("Text Only")};
+}
 using cutefish::i18n::trNoop;
 
 static constexpr double kSmallSpacing = 6;
@@ -294,10 +300,16 @@ public:
     HeaderRow()
     {
         navigation = addChild<ui::NavigationButtons>();
+        navigation->setToolbarAppearance(true);
         back = navigation->back();
         back->setName("backButton");
         forward = navigation->forward();
         forward->setName("forwardButton");
+        navigationCaption = addChild<ui::Label>();
+        navigationCaption->setFontSize(10);
+        navigationCaption->setColor(ui::ColorId::DisabledText);
+        navigationCaption->setTextAlignment(ui::Label::TextAlignment::Center);
+        navigationCaption->setVerticallyCentered(true);
         pathBar = addChild<PathBar>();
         toolbar = addChild<ui::Toolbar>();
         toolbar->setDefaults(Preferences::defaultToolbar());
@@ -306,21 +318,25 @@ public:
 
     void setupItems()
     {
-        items = {{"views", tr("View"), "grid", 124, [this](ui::Toolbar& owner) -> ui::View* {
+        navigationCaption->setText(tr("Back/Forward"));
+        items = {{"views", tr("View"), "view-icons", 134, [this](ui::Toolbar& owner) -> ui::View* {
             auto* control = owner.addChild<ui::SegmentedControl>(viewNames());
             control->setName("viewModeControl");
             control->setToolbarAppearance(true);
             const bool labels = owner.display() == ui::Toolbar::Display::IconsAndText;
-            control->setContentHeight(labels ? 32 : 26);
+            control->setContentHeight(24);
             control->setFontSize(10);
-            control->setGlyphs({"grid", "list", "view-columns", "view-gallery"}, labels);
+            control->setGlyphs({"view-icons", "view-list", "view-columns", "view-gallery"});
+            if (labels)
+                control->setToolbarCaption(tr("View"));
             control->onCurrentChanged = [this](int index) { if (onViewChanged) onViewChanged(kViews.at(size_t(index))); };
             control->setCurrentIndex(viewIndex(mode));
             return control;
-        }, {"grid", "list", "view-columns", "view-gallery"}}, {"group", tr("Group"), "view-group", 39, {}, {}, true},
-                  {"share", tr("Share"), "share"}, {"tags", tr("Tags"), "tag"},
-                 {"action", tr("Action"), "ellipsis"}, {"search", tr("Search"), "search"},
-                 {"info", tr("Get Info"), "info"}, {"quicklook", tr("Quick Look"), "image"},
+        }, {"view-icons", "view-list", "view-columns", "view-gallery"}}, {"group", tr("Group"), "view-group", 43, {}, {}, true},
+                   {"share", tr("Share"), "share", 33, {}, {}, false, "actions"},
+                   {"tags", tr("Add Tags"), "tag", 33, {}, {}, false, "actions"},
+                   {"action", tr("Action"), "ellipsis", 33, {}, {}, false, "actions"}, {"search", tr("Search"), "search", 34},
+                  {"info", tr("Get Info"), "info"}, {"quicklook", tr("Quick Look"), "view-quick-look"},
                  {"preview", tr("Preview"), "sidebar"}, {"newfolder", tr("New Folder"), "folder"}};
         toolbar->setItems(items);
         syncToolbar();
@@ -331,6 +347,7 @@ public:
         auto& prefs = Preferences::instance();
         toolbar->setDisplay(static_cast<ui::Toolbar::Display>(prefs.toolbarDisplay()));
         toolbar->setOrder(prefs.toolbarOrder());
+        toolbar->setPreviewSelection("views", viewIndex(mode));
         for (const auto& child : toolbar->children())
             if (auto* control = dynamic_cast<ui::SegmentedControl*>(child.get()))
                 control->setCurrentIndex(viewIndex(mode));
@@ -339,6 +356,7 @@ public:
     ui::NavigationButtons* navigation;
     ui::HeaderButton* back;
     ui::HeaderButton* forward;
+    ui::Label* navigationCaption;
     PathBar* pathBar;
     ui::Toolbar* toolbar;
     std::vector<ui::Toolbar::Item> items;
@@ -352,18 +370,21 @@ protected:
         double x = sidebarWidth + kNavigationStart;
         const double right = geometry().width;
         // The plate is centred on the window controls' line.
+        const auto hint = toolbar->sizeHint();
+        const bool labels = toolbar->display() == ui::Toolbar::Display::IconsAndText;
+        const double toolbarY = centeredStart(geometry().height, hint.height);
         const ui::SizeF plate = navigation->sizeHint();
-        navigation->setGeometry({x, kButtonsTopMargin + (kButtonSize - plate.height) / 2, plate.width,
-                                 plate.height});
+        navigation->setGeometry({x, toolbarY, plate.width, plate.height});
+        navigationCaption->setVisible(labels);
+        navigationCaption->setGeometry({x - 8, toolbarY + plate.height, plate.width + 16, 10});
         x += plate.width + ui::window_controls::kSpacing;
         const double end = right - kHeaderEndMargin;
-        const auto hint = toolbar->sizeHint();
         const auto& order = toolbar->order();
         const bool flexible = std::find(order.begin(), order.end(), ui::Toolbar::FlexibleSpace) != order.end();
         const double width = flexible ? std::max(hint.width, end - x - 140) : hint.width;
         const double toolbarX = std::max(x + 48, end - width);
-        toolbar->setGeometry({toolbarX, centeredStart(geometry().height, hint.height), std::max(0.0, end - toolbarX), hint.height});
-        pathBar->setGeometry({x + 4, kButtonsTopMargin, std::max(0.0, toolbarX - x - 10), kButtonSize});
+        toolbar->setGeometry({toolbarX, toolbarY, std::max(0.0, end - toolbarX), hint.height});
+        pathBar->setGeometry({x + 4, std::max(0.0, toolbarY - 1), std::max(0.0, toolbarX - x - 10), kButtonSize});
     }
 };
 
@@ -382,9 +403,15 @@ public:
         m_default = header.toolbar->makePaletteItem(*this, ui::Toolbar::DefaultSet, tr("Default Set"), "");
         m_resetHint = addChild<ui::Label>(tr("…or drag the default set into the toolbar."));
         m_resetHint->setWrap(true);
+        m_show = addChild<ui::Label>(tr("Show:"));
+        display = addChild<ui::ComboBox>(toolbarDisplays());
+        display->setName("toolbarDisplayPicker");
+        display->setCurrentIndex(Preferences::instance().toolbarDisplay());
+        display->onActivated = [](int index) { Preferences::instance().setToolbarDisplay(index); };
         done = addChild<ui::DialogButton>(tr("Done"));
     }
     ui::DialogButton* done;
+    ui::ComboBox* display;
     bool acceptsPointer() const override { return true; }
 
 protected:
@@ -395,11 +422,14 @@ protected:
         const int columns = width >= 570 ? 6 : 4;
         for (size_t i = 0; i < m_items.size(); ++i) {
             const double cell = (width - 36) / columns;
-            m_items[i]->setGeometry({18 + cell * (i % columns), 55 + 46.0 * (i / columns), cell - 5, 40});
+            m_items[i]->setGeometry({18 + cell * (i % columns), 55 + 47.0 * (i / columns), cell - 5, 43});
         }
-        m_resetHint->setGeometry({18, geometry().height - 82, width - 36, 29});
-        m_default->setGeometry({18, geometry().height - 50, width - 132, 32});
-        done->setGeometry({width - 94, geometry().height - 50, 76, 32});
+        m_resetHint->setGeometry({18, geometry().height - 106, width - 36, 25});
+        m_default->setGeometry({18, geometry().height - 78, width - 36, 32});
+        const double labelWidth = std::ceil(m_show->sizeHint().width);
+        m_show->setGeometry({18, geometry().height - 37, labelWidth, 27});
+        display->setGeometry({28 + labelWidth, geometry().height - 37, 142, 27});
+        done->setGeometry({width - 94, geometry().height - 38, 76, 28});
     }
     void paint(ui::Painter& painter) override
     {
@@ -407,6 +437,7 @@ protected:
     }
 
 private:
+    ui::Label* m_show;
     ui::Label* m_help;
     ui::Label* m_resetHint;
     std::vector<ui::View*> m_items;
@@ -1036,6 +1067,8 @@ void FolderWindow::updateHeader()
         m_viewOptions->sync(page);
     m_root->row->mode = page->viewMethod();
     m_root->row->syncToolbar();
+    if (m_root->palette)
+        m_root->palette->display->setCurrentIndex(Preferences::instance().toolbarDisplay());
     m_back->setEnabled(model.canGoBack());
     m_forward->setEnabled(model.canGoForward());
 
@@ -1410,9 +1443,9 @@ void FolderWindow::buildMainMenu()
     ui::Menu* toolbar = view->addSubmenu(tr("Toolbar"));
     toolbar->onAboutToShow = [this, toolbar] {
         toolbar->clear();
-        const char* displays[] {trNoop("Icon Only"), trNoop("Icon and Text"), trNoop("Text Only")};
-        for (int i = 0; i < 3; ++i) {
-            const auto row = toolbar->addItem(tr(displays[i]), [i] { Preferences::instance().setToolbarDisplay(i); });
+        const auto displays = toolbarDisplays();
+        for (int i = 0; i < int(displays.size()); ++i) {
+            const auto row = toolbar->addItem(displays[i], [i] { Preferences::instance().setToolbarDisplay(i); });
             toolbar->setItemChecked(row, Preferences::instance().toolbarDisplay() == i);
         }
         toolbar->addSeparator();
