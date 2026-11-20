@@ -28,6 +28,7 @@ public:
     ~ConnectServerDialog();
 
     void show();
+    ui::Window* window() const;
     // The address typed stays.
     void retranslate();
     std::function<void()> onDone;
@@ -58,6 +59,7 @@ public:
     ~ServerPasswordDialog();
 
     void show();
+    ui::Window* window() const;
     // What was typed and chosen stays.
     void retranslate();
     std::function<void()> onDone;

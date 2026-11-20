@@ -131,7 +131,9 @@ std::string MountsClient::normalizedAddress(const std::string& address)
     files::Url url(text);
     if (url.scheme() == "ssh")
         url.setScheme("sftp");
-    if (!url.isValid() || url.host().empty() || (url.scheme() != "smb" && url.scheme() != "sftp"))
+    // Credentials belong in the masked prompt, never in recent-server URLs.
+    if (!url.isValid() || url.host().empty() || url.userInfo().find(':') != std::string::npos
+        || url.hasQuery() || url.hasFragment() || (url.scheme() != "smb" && url.scheme() != "sftp"))
         return {};
     return url.strippedTrailingSlash().toString();
 }

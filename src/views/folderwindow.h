@@ -29,6 +29,7 @@ class WindowTabBar;
 namespace fm {
 
 class FolderWindowRoot;
+class GoToFolderDialog;
 class PathBar;
 class SideBar;
 
@@ -111,7 +112,7 @@ private:
     void updateBackground();
     void updateBlur();
     void updateTabBar();
-    void showContextMenu(ui::PointF position);
+    void showContextMenu(ui::PointF position, bool fromToolbar = false);
     void toolbarAction(const std::string& id, ui::PointF position);
     void showSharePopup();
     void populateGrouping(ui::Menu& menu);
@@ -121,6 +122,7 @@ private:
     void showAbout();
     double headerHeight() const;
     void addShortcuts();
+    void goToFolder();
     void selectView(int mode);
 
     FileManagerHost* m_host;
@@ -129,6 +131,7 @@ private:
     std::unique_ptr<ui::Window> m_window;
     FolderWindowRoot* m_root = nullptr;
     SideBar* m_sidebar = nullptr;
+    std::unique_ptr<GoToFolderDialog> m_goToFolder;
     PathBar* m_pathBar = nullptr;
     ui::WindowTabBar* m_tabBar = nullptr;
     ui::HeaderButton* m_back = nullptr;

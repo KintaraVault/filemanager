@@ -3,7 +3,9 @@
 
 #include "testutil.h"
 
+#include "core/mounts.h"
 #include "core/preferences.h"
+#include "dialogs/gotofolder.h"
 #include "model/foldermodel.h"
 #include "views/folderpage.h"
 #include "views/folderview.h"
@@ -13,6 +15,7 @@
 #include "views/pathbar.h"
 #include "views/renameeditor.h"
 
+#include "base/i18n.h"
 #include "base/url.h"
 #include "ui/application.h"
 #include "ui/clipboard.h"
@@ -28,6 +31,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -165,6 +169,60 @@ TEST(HeaderTest, TahoeToolbarGroupsActionsAndRestylesWithoutChangingTheirTargets
     ASSERT_TRUE(runUntil(s_app->loop(), [&] { return toolbar->order() == prefs.toolbarOrder(); }));
     window.grab();
     EXPECT_LT(toolbar->itemView("share")->geometry().right(), toolbar->itemView("tags")->geometry().x);
+}
+
+TEST(HeaderTest, ToolbarEllipsisOpensGoToFolder)
+{
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    auto& prefs = fm::Preferences::instance();
+    struct RestoreOrder {
+        fm::Preferences& prefs;
+        std::vector<std::string> order;
+        ~RestoreOrder() { prefs.setToolbarOrder(order); }
+    } restore {prefs, prefs.toolbarOrder()};
+    prefs.setToolbarOrder(fm::Preferences::defaultToolbar());
+    WindowHost host;
+    fm::FolderWindow browser(&host, {directory.path(), {}, {}, {}}, {1050, 720});
+    browser.show();
+    auto& window = browser.window();
+    window.grab();
+    auto* toolbar = dynamic_cast<ui::Toolbar*>(findView(window.contentView(), "toolbar"));
+    ASSERT_TRUE(toolbar);
+    auto* action = toolbar->itemView("action");
+    ASSERT_TRUE(action);
+    const auto center = [](const ui::View* view) {
+        const auto rect = view->localRect();
+        return view->mapToWindow({rect.width / 2, rect.height / 2});
+    };
+    ui::TestInput::click(window, center(action));
+
+    const auto& windows = s_app->windows();
+    const auto popup = std::find_if(windows.begin(), windows.end(), [&window](const auto* candidate) {
+        return candidate->parentWindow() == &window;
+    });
+    ASSERT_NE(popup, windows.end());
+    auto* menu = *popup;
+    menu->grab();
+    const std::string text = i18n::tr("Go to Folder…");
+    auto findLabel = [&](auto&& self, ui::View* view) -> ui::Label* {
+        if (auto* label = dynamic_cast<ui::Label*>(view); label && label->text() == text)
+            return label;
+        for (const auto& child : view->children()) {
+            if (auto* found = self(self, child.get()))
+                return found;
+        }
+        return nullptr;
+    };
+    auto* item = findLabel(findLabel, menu->contentView());
+    ASSERT_TRUE(item);
+    ui::TestInput::click(*menu, center(item));
+    EXPECT_TRUE(runUntil(s_app->loop(), [&] {
+        return std::any_of(windows.begin(), windows.end(), [&window](const auto* candidate) {
+            return candidate->transientParent() == &window && candidate->contentView()
+                && findView(candidate->contentView(), "folderSuggestions");
+        });
+    }));
 }
 
 TEST(HeaderTest, SharePopoverShowsSelectionAndCopiesIt)
@@ -571,4 +629,32 @@ TEST(HeaderTest, LanguageChangeKeepsWhereTheUserWas)
     EXPECT_TRUE(view->isRenaming());
     EXPECT_EQ(findView(view, "renameEditor"), editor);
     EXPECT_EQ(field->text(), "draft.txt");
+}
+
+TEST(FolderDialog, ResolvesLocalPathsAndSuggestsOnlyDirectories)
+{
+    fmtest::TemporaryDir directory;
+    const auto root = directory.filePath("home");
+    std::filesystem::create_directories(root + "/Documents");
+    std::filesystem::create_directory(root + "/Downloads");
+    std::filesystem::create_directory(root + "/.hidden");
+    std::ofstream(root + "/Doc.txt") << "not a folder";
+    const auto url = base::url::fromLocalFile(root);
+    EXPECT_EQ(fm::folderPath("Documents", url, root), root + "/Documents");
+    EXPECT_EQ(fm::folderPath("~/Downloads", url, root), root + "/Downloads");
+    EXPECT_EQ(fm::folderPath(url, {}, root), root);
+    EXPECT_TRUE(fm::folderPath("file:///tmp/a%00b", url, root).empty());
+    EXPECT_TRUE(fm::folderPath("smb://server/share", url, root).empty());
+    EXPECT_EQ(fm::folderSuggestions("~/Do", url, root),
+              (std::vector<std::string>{root + "/Documents", root + "/Downloads"}));
+    EXPECT_EQ(fm::folderSuggestions("~/.", url, root), (std::vector<std::string>{root + "/.hidden"}));
+}
+
+TEST(FolderDialog, ServerAddressesNeverStorePasswords)
+{
+    EXPECT_EQ(fm::MountsClient::normalizedAddress(R"(\\server\share)"), "smb://server/share");
+    EXPECT_EQ(fm::MountsClient::normalizedAddress("ssh://me@server:2222"), "sftp://me@server:2222");
+    EXPECT_TRUE(fm::MountsClient::normalizedAddress("https://server/path").empty());
+    EXPECT_TRUE(fm::MountsClient::normalizedAddress("sftp://me%3Asecret@server").empty());
+    EXPECT_TRUE(fm::MountsClient::normalizedAddress("smb://server/path?password=secret").empty());
 }

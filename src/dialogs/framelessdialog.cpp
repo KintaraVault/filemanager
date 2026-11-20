@@ -196,6 +196,7 @@ void FramelessDialog::show()
     }
     m_window = std::make_unique<ui::Window>();
     m_window->setTitle(m_title);
+    m_window->setDialogAppearance();
     if (m_parent)
         m_window->setTransientParent(m_parent, m_modal);
     auto root = std::make_unique<Root>(m_closeButton, m_centeredHeader);

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "base/signal.h"
 #include "core/launcher.h"
 #include "dialogs/framelessdialog.h"
 
@@ -12,6 +13,7 @@
 
 namespace cutefish::ui {
 class CheckBox;
+class Label;
 class ListView;
 }
 
@@ -23,6 +25,7 @@ class OpenWithDialog : public FramelessDialog
 {
 public:
     OpenWithDialog(std::string path, std::string mimeType);
+    void show();
 
     // The application chosen and Set as default stay.
     void retranslate() override;
@@ -38,8 +41,11 @@ private:
     std::string m_mimeType;
     std::vector<launcher::Application> m_applications;
     int m_current = 0;
+    bool m_hasShortcuts = false;
+    cutefish::base::Subscription m_registryChanged;
     ui::ListView* m_list = nullptr;
     ui::CheckBox* m_default = nullptr;
+    ui::Label* m_status = nullptr;
 };
 
 } // namespace fm

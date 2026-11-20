@@ -27,6 +27,7 @@
 #include "ui/painter.h"
 #include "ui/progress_bar.h"
 #include "ui/cell_layout.h"
+#include "ui/scroll_view.h"
 #include "ui/text_field.h"
 #include "ui/theme.h"
 #include "ui/window.h"
@@ -42,10 +43,12 @@ using cutefish::i18n::tr;
 
 static constexpr double kWidth = 860;
 static constexpr double kHeight = 520;
+static constexpr double kCompactWidth = 390;
+static constexpr double kCompactHeight = 318;
 static constexpr double kSideBarWidth = 180;
 static constexpr double kSmallSpacing = 6;
-static constexpr double kLargeSpacing = 12;
-static constexpr double kFieldHeight = 30;
+static constexpr double kLargeSpacing = ui::design::dialogInset;
+static constexpr double kFieldHeight = ui::design::compactControlHeight;
 
 // The chooser's places: favourites, disks and local mounts; remote places
 // cannot be handed to the portal as local paths.
@@ -60,6 +63,14 @@ public:
     }
 
     bool acceptsPointer() const override { return true; }
+
+    double heightForWidth(double) const override
+    {
+        double height = kLargeSpacing + 32;
+        for (const Row& row : m_rows)
+            height += (row.section ? 36 : 0) + (row.usable ? rowHeight() + 3 : 0);
+        return height;
+    }
 
     void rebuild()
     {
@@ -101,13 +112,13 @@ public:
     }
 
 protected:
-    double rowHeight() const { return std::max(34.0, style::fontHeight() + 12); }
+    double rowHeight() const { return std::max(double(ui::design::sidebarRowHeight), style::fontHeight() + 10); }
 
     void layout() override
     {
         const ui::Theme& theme = ui::Theme::current();
         const double width = geometry().width;
-        const double inset = kSmallSpacing * 1.5;
+        const double inset = 8;
         double y = kLargeSpacing;
         m_favorites->setColor(theme.disabledText);
         m_favorites->setGeometry({inset + kSmallSpacing, y + centeredStart(32, m_favorites->sizeHint().height),
@@ -136,15 +147,14 @@ protected:
                 row.label->setGeometry({labelX, y + centeredStart(height, labelHeight),
                                         std::max(0.0, width - inset - kSmallSpacing - labelX), labelHeight});
             }
-            // A ListView spaces its rows, the hidden ones too.
-            y += height + 3;
+            if (row.usable)
+                y += height + 3;
         }
     }
 
     void paint(ui::Painter& painter) override
     {
-        const ui::Theme& theme = ui::Theme::current();
-        const double inset = kSmallSpacing * 1.5;
+        const double inset = 8;
         for (const Row& row : m_rows) {
             if (!row.usable)
                 continue;
@@ -152,10 +162,10 @@ protected:
             if (&row - m_rows.data() == m_pressed)
                 fill = ui::color(ui::ColorId::ItemPressed);
             else if (row.checked)
-                fill = style::textAlpha(0.05);
+                fill = ui::Theme::current().highlight.withAlpha(.12);
             if (fill.a)
-                painter.drawSmoothRectangle({inset, row.rect.y, row.rect.width - inset * 2, row.rect.height},
-                                           theme.mediumRadius, fill);
+                painter.drawRoundedRect({inset, row.rect.y, row.rect.width - inset * 2, row.rect.height},
+                                        {ui::design::menuItemRadius, 0, ui::themeCorners()}, fill);
         }
     }
 
@@ -325,7 +335,17 @@ public:
         , m_chooser(chooser)
     {
         m_places = std::make_unique<PlacesModel>();
-        places = addChild<ChooserPlaces>(chooser, *m_places);
+        placesScroll = addChild<ui::ScrollView>();
+        placesScroll->setScrollDirections(false, true);
+        placesScroll->setCornerRadius(12);
+        places = placesScroll->setContent<ChooserPlaces>(chooser, *m_places);
+        title = addChild<ui::Label>(chooser.title());
+        title->setWeight(600);
+        title->setElide(ui::Label::Elide::Right);
+        title->setVerticallyCentered(true);
+        saveIcon = addChild<ui::Icon>("folder", 22);
+        saveHint = addChild<ui::Label>(tr("Choose a name and location for the file."));
+        saveHint->setWrap(true);
 
         back = addChild<ui::HeaderButton>(std::string(), 30);
         back->setGlyph("chevron-left", 16);
@@ -336,7 +356,12 @@ public:
         for (ui::HeaderButton* button : {back, forward})
             button->setPlateAlphas({0.17, 0.26}, {0.21, 0.15});
         pathBar = addChild<ChooserPathBar>(chooser);
-        pathBar->onClosed = [this] { list->contentView()->setFocus(); };
+        pathBar->onClosed = [this] {
+            if (m_expanded)
+                list->contentView()->setFocus();
+            else
+                nameField->setFocus();
+        };
 
         list = addChild<FolderListView>(chooser.folder());
         list->setName("fileList");
@@ -348,6 +373,7 @@ public:
         busy->setVisible(false);
 
         saveAsLabel = addChild<ui::Label>(tr("Save As:"));
+        whereLabel = addChild<ui::Label>(tr("Location:"));
         nameField = addChild<ui::TextField>(chooser.fileName());
         nameField->setName("fileNameField");
         nameField->setSelectByMouse(true);
@@ -401,6 +427,9 @@ public:
         summary = addChild<ui::Label>();
         summary->setElide(ui::Label::Elide::Middle);
         summary->setVisible(chooser.multiple());
+        expand = addChild<ui::DialogButton>();
+        expand->setName("toggleFileBrowser");
+        expand->onClicked = [this] { setExpanded(!m_expanded); };
         cancel = addChild<ui::DialogButton>(tr("Cancel"));
         cancel->setName("cancelButton");
         cancel->onClicked = [this] { m_chooser.cancel(); };
@@ -420,7 +449,10 @@ public:
             requestLayout();
         }));
         m_subscriptions.push_back(chooser.folder().statusChanged.connect([this] { updateBusy(); }));
-        m_subscriptions.push_back(m_places->changed.connect([this] { places->rebuild(); }));
+        m_subscriptions.push_back(m_places->changed.connect([this] {
+            places->rebuild();
+            placesScroll->requestLayout();
+        }));
         m_subscriptions.push_back(m_places->deviceSetupDone.connect([this](const std::string& path) { m_chooser.navigate(path); }));
         m_subscriptions.push_back(m_places->passphraseRequested.connect([this](std::string udi, std::string name, bool retry) {
             m_owner->m_unlock = std::make_unique<UnlockVolumeDialog>(this->window(), *m_places, std::move(udi),
@@ -435,16 +467,45 @@ public:
         }));
         locationChanged();
         summary->setText(chooser.selectionSummary());
+        nameField->setVisible(chooser.saveMode());
+        saveAsLabel->setVisible(chooser.saveMode());
+        expand->setVisible(canCollapse());
     }
 
     bool canCreateFolder() const { return m_chooser.saveMode() || m_chooser.directoryMode(); }
+    bool canCollapse() const { return m_chooser.saveMode() && m_choices.empty(); }
     bool acceptsPointer() const override { return true; }
+
+    void setExpanded(bool expanded)
+    {
+        m_expanded = expanded || !canCollapse();
+        const ui::SizeF size = m_expanded ? ui::SizeF{kWidth, kHeight} : ui::SizeF{kCompactWidth, kCompactHeight};
+        window()->setMinimumSize({});
+        window()->setMaximumSize(size);
+        window()->setMinimumSize(size);
+        window()->resize(size);
+        placesScroll->setVisible(m_expanded);
+        back->setVisible(m_expanded);
+        forward->setVisible(m_expanded);
+        list->setVisible(m_expanded);
+        newFolder->setVisible(m_expanded && canCreateFolder());
+        whereLabel->setVisible(!m_expanded);
+        saveIcon->setVisible(!m_expanded);
+        saveHint->setVisible(!m_expanded);
+        expand->setText(m_expanded ? tr("Hide Folders") : tr("Browse…"));
+        updateBusy();
+        requestLayout();
+    }
 
     // The location, the list's selection, the name typed and the filter stay.
     void retranslate()
     {
         saveAsLabel->setText(tr("Save As:"));
         filterLabel->setText(tr("File Type:"));
+        whereLabel->setText(tr("Location:"));
+        title->setText(m_chooser.title());
+        saveHint->setText(tr("Choose a name and location for the file."));
+        expand->setText(m_expanded ? tr("Hide Folders") : tr("Browse…"));
         newFolder->setText(tr("New Folder"));
         cancel->setText(tr("Cancel"));
         accept->setText(m_chooser.acceptLabel());
@@ -470,17 +531,23 @@ public:
     }
 
     ChooserPlaces* places;
+    ui::ScrollView* placesScroll;
+    ui::Label* title;
+    ui::Icon* saveIcon;
+    ui::Label* saveHint;
     ui::HeaderButton* back;
     ui::HeaderButton* forward;
     ChooserPathBar* pathBar;
     FolderListView* list;
     ui::BusyIndicator* busy;
     ui::Label* saveAsLabel;
+    ui::Label* whereLabel;
     ui::TextField* nameField;
     ui::Label* filterLabel;
     ui::ComboBox* filterCombo;
     ui::Label* error;
     ui::DialogButton* newFolder;
+    ui::DialogButton* expand;
     ui::Label* summary;
     ui::DialogButton* cancel;
     ui::DialogButton* accept;
@@ -490,43 +557,95 @@ protected:
     {
         const ui::Theme& theme = ui::Theme::current();
         const ui::RectF rect = localRect();
-        places->setGeometry({0, 0, kSideBarWidth, rect.height});
-
-        const double left = kSideBarWidth;
+        const double titleHeight = 28;
+        const double left = m_expanded ? kSideBarWidth : 0;
         const double width = rect.width - left;
         const double inner = width - 2 * kLargeSpacing;
+        const double edge = left + kLargeSpacing;
+        const double gap = 10;
+        const double titleX = m_expanded ? edge : edge + 100;
+        title->setFontSize(theme.fontSize() + (m_expanded ? 0 : 4));
+        title->setGeometry({titleX, kLargeSpacing - 5, edge + inner - titleX, titleHeight});
+        placesScroll->setGeometry({8, 20, kSideBarWidth - 8, rect.height - 40});
+        if (!m_expanded) {
+            saveIcon->setColor(theme.highlight);
+            saveIcon->setGeometry({edge + 20, kLargeSpacing + 13, 22, 22});
+            saveHint->setColor(theme.disabledText);
+            const double hintWidth = edge + inner - titleX - 20;
+            saveHint->setGeometry({titleX, title->geometry().bottom() + 2, hintWidth, saveHint->heightForWidth(hintWidth)});
+        }
+
+        double y = title->geometry().bottom() + gap;
+        if (!m_expanded)
+            y = std::max(108.0, saveHint->geometry().bottom() + gap);
+        const bool save = m_chooser.saveMode();
+        const bool filter = !m_chooser.filters().empty();
+        filterLabel->setVisible(filter);
+        filterCombo->setVisible(filter);
+        double labelWidth = std::max(saveAsLabel->sizeHint().width, filterLabel->sizeHint().width);
+        if (!m_expanded)
+            labelWidth = std::max({labelWidth, whereLabel->sizeHint().width, 90.0});
+        labelWidth = std::min(labelWidth, inner * .45);
+        const double fieldX = edge + labelWidth + gap;
+        const double fieldWidth = inner - labelWidth - gap - (m_expanded ? 0 : 20);
+        const auto placeField = [&](ui::Label* label, ui::View* field, double rowY) {
+            placeLabel(label, edge, rowY, labelWidth);
+            field->setGeometry({fieldX, rowY, fieldWidth, kFieldHeight});
+        };
+        if (save) {
+            placeField(saveAsLabel, nameField, y);
+            y += kFieldHeight + gap;
+        }
 
         // The header row.
-        double y = kLargeSpacing;
-        back->setEnabled(m_chooser.folder().canGoBack());
-        forward->setEnabled(m_chooser.folder().canGoForward());
-        double x = left + kLargeSpacing;
-        back->setGeometry({x, y, 30, 30});
-        x += 30 + kSmallSpacing / 2;
-        forward->setGeometry({x, y, 30, 30});
-        x += 30 + kSmallSpacing / 2 + kSmallSpacing / 2;
-        pathBar->setGeometry({x, y, left + width - kLargeSpacing - x, 30});
-        y += 30 + kLargeSpacing;
+        if (m_expanded) {
+            back->setEnabled(m_chooser.folder().canGoBack());
+            forward->setEnabled(m_chooser.folder().canGoForward());
+            back->setGeometry({edge, y, 30, 30});
+            forward->setGeometry({edge + 33, y, 30, 30});
+            pathBar->setGeometry({edge + 69, y, inner - 69, 30});
+            y += 30 + gap;
+        } else {
+            if (filter) {
+                placeField(filterLabel, filterCombo, y);
+                y += kFieldHeight + gap;
+            }
+            placeField(whereLabel, pathBar, y);
+            y += kFieldHeight + gap;
+        }
 
         // From the bottom: the buttons, the error, the fields.
         double bottom = rect.height - kLargeSpacing;
         const double buttonHeight = std::max({cancel->sizeHint().height, accept->sizeHint().height,
-                                              newFolder->isVisible() ? newFolder->sizeHint().height : 0.0});
+                                             newFolder->isVisible() ? newFolder->sizeHint().height : 0.0,
+                                             expand->isVisible() ? expand->sizeHint().height : 0.0});
         const double buttonsY = bottom - buttonHeight;
         double right = left + width - kLargeSpacing;
-        const ui::SizeF acceptSize = accept->sizeHint();
+        const int buttons = 2 + int(newFolder->isVisible()) + int(expand->isVisible());
+        const double maxButtonWidth = (inner - (buttons - 1) * kSmallSpacing) / buttons;
+        const auto buttonSize = [maxButtonWidth](const ui::DialogButton* button) {
+            auto size = button->sizeHint();
+            size.width = std::clamp(size.width, std::min(76.0, maxButtonWidth), maxButtonWidth);
+            return size;
+        };
+        const ui::SizeF acceptSize = buttonSize(accept);
         accept->setGeometry({right - acceptSize.width, buttonsY + centeredStart(buttonHeight, acceptSize.height),
                              acceptSize.width, acceptSize.height});
         right -= acceptSize.width + kSmallSpacing;
-        const ui::SizeF cancelSize = cancel->sizeHint();
+        const ui::SizeF cancelSize = buttonSize(cancel);
         cancel->setGeometry({right - cancelSize.width, buttonsY + centeredStart(buttonHeight, cancelSize.height),
                              cancelSize.width, cancelSize.height});
         right -= cancelSize.width + kSmallSpacing;
-        double buttonX = left + kLargeSpacing;
+        double buttonX = edge;
         if (newFolder->isVisible()) {
-            const ui::SizeF size = newFolder->sizeHint();
+            const ui::SizeF size = buttonSize(newFolder);
             newFolder->setGeometry({buttonX, buttonsY + centeredStart(buttonHeight, size.height), size.width,
                                     size.height});
+            buttonX += size.width + kSmallSpacing;
+        }
+        if (expand->isVisible()) {
+            const ui::SizeF size = buttonSize(expand);
+            expand->setGeometry({buttonX, buttonsY + centeredStart(buttonHeight, size.height), size.width, size.height});
             buttonX += size.width + kSmallSpacing;
         }
         if (summary->isVisible()) {
@@ -536,50 +655,31 @@ protected:
             summary->setGeometry({summaryX, buttonsY + centeredStart(buttonHeight, height),
                                   std::max(0.0, std::min(summary->sizeHint().width, right - summaryX)), height});
         }
-        bottom = buttonsY - kLargeSpacing * 2;
+        m_footerY = buttonsY - 10;
+        bottom = m_footerY - 10;
 
         if (error->isVisible()) {
             error->setColor(ui::color(ui::ColorId::DestructiveAction));
             const double height = error->heightForWidth(inner);
-            error->setGeometry({left + kLargeSpacing, bottom - height, inner, height});
-            bottom -= height + kLargeSpacing;
+            error->setGeometry({edge, bottom - height, inner, height});
+            bottom -= height + gap;
         }
 
-        const bool fields = m_chooser.saveMode() || !m_chooser.filters().empty() || !m_chooser.choices().empty();
-        if (fields) {
-            // One left edge for the fields of both rows.
-            const double labelWidth = std::max(saveAsLabel->sizeHint().width, filterLabel->sizeHint().width);
-            std::vector<double> heights;
-            const bool save = m_chooser.saveMode();
-            const bool filter = !m_chooser.filters().empty();
+        if (m_expanded && (filter || !m_choices.empty())) {
             double height = 0;
             auto addRow = [&](double rowHeight) {
                 if (height > 0)
                     height += kSmallSpacing;
                 height += rowHeight;
             };
-            if (save)
-                addRow(kFieldHeight);
             if (filter)
                 addRow(kFieldHeight);
             for (const ChoiceRow& row : m_choices)
                 addRow(row.check ? row.check->sizeHint().height : kFieldHeight);
             double rowY = bottom - height;
-            bottom = rowY - kLargeSpacing;
-            const double fieldX = left + kLargeSpacing + labelWidth + kSmallSpacing;
-            const double fieldWidth = left + width - kLargeSpacing - fieldX;
-            saveAsLabel->setVisible(save);
-            nameField->setVisible(save);
-            if (save) {
-                placeLabel(saveAsLabel, left + kLargeSpacing, rowY, labelWidth);
-                nameField->setGeometry({fieldX, rowY, fieldWidth, kFieldHeight});
-                rowY += kFieldHeight + kSmallSpacing;
-            }
-            filterLabel->setVisible(filter);
-            filterCombo->setVisible(filter);
+            bottom = rowY - gap;
             if (filter) {
-                placeLabel(filterLabel, left + kLargeSpacing, rowY, labelWidth);
-                filterCombo->setGeometry({fieldX, rowY, fieldWidth, kFieldHeight});
+                placeField(filterLabel, filterCombo, rowY);
                 rowY += kFieldHeight + kSmallSpacing;
             }
             for (ChoiceRow& row : m_choices) {
@@ -588,21 +688,16 @@ protected:
                     row.check->setGeometry({left + kLargeSpacing, rowY, size.width, size.height});
                     rowY += size.height + kSmallSpacing;
                 } else {
-                    const double labelWidthHere = row.label->sizeHint().width;
+                    const double labelWidthHere = std::min(row.label->sizeHint().width, inner * .45);
                     placeLabel(row.label, left + kLargeSpacing, rowY, labelWidthHere);
                     const double comboX = left + kLargeSpacing + labelWidthHere + kSmallSpacing;
                     row.combo->setGeometry({comboX, rowY, left + width - kLargeSpacing - comboX, kFieldHeight});
                     rowY += kFieldHeight + kSmallSpacing;
                 }
             }
-        } else {
-            saveAsLabel->setVisible(false);
-            nameField->setVisible(false);
-            filterLabel->setVisible(false);
-            filterCombo->setVisible(false);
         }
 
-        const ui::RectF listRect {left, y, width, std::max(0.0, bottom - y)};
+        const ui::RectF listRect {edge, y, inner, std::max(0.0, bottom - y)};
         list->setGeometry(listRect);
         busy->setGeometry({listRect.x + centeredStart(listRect.width, 22), listRect.y + centeredStart(listRect.height, 22),
                            22, 22});
@@ -610,17 +705,28 @@ protected:
 
     void paint(ui::Painter& painter) override
     {
-        const ui::Theme& theme = ui::Theme::current();
         const ui::RectF rect = localRect();
-        painter.fillRect({0, 0, kSideBarWidth, rect.height}, ui::color(FmColor::ChooserSidebarBackground));
-        painter.fillRect({kSideBarWidth, 0, rect.width - kSideBarWidth, rect.height}, theme.secondBackground);
+        const auto separator = ui::color(ui::ColorId::Separator);
+        const double left = m_expanded ? kSideBarWidth : 0;
+        if (m_expanded) {
+            painter.fillRoundedRect({8, 8, left - 8, rect.height - 16}, 18,
+                                    ui::color(FmColor::ChooserSidebarBackground), ui::themeCorners());
+            painter.strokeRoundedRect(list->geometry().adjusted(-1, -1, 1, 1), 8, separator);
+        } else {
+            const auto& theme = ui::Theme::current();
+            const ui::RectF icon = saveIcon->geometry().adjusted(-13, -13, 13, 13);
+            painter.fillRoundedRect(icon, 12, theme.highlight.withAlpha(.14), ui::themeCorners());
+            if (!pathBar->isEditing())
+                painter.fillRoundedRect(pathBar->geometry(), 9, theme.alternateBackground, ui::themeCorners());
+        }
+        painter.drawHorizontalLine(left + kLargeSpacing, m_footerY, rect.width - left - 2 * kLargeSpacing, separator);
     }
 
     // The top strip stands in for the title bar: a drag there moves the window.
     void pointerPress(const ui::PointerEvent& event) override
     {
         m_press = event.position;
-        m_pressActive = event.position.y < kLargeSpacing * 2;
+        m_pressActive = event.button == ui::MouseButton::Left && event.position.y < kLargeSpacing * 2;
     }
 
     void pointerMove(const ui::PointerEvent& event) override
@@ -663,6 +769,8 @@ protected:
         }
         if (modifiers == (ui::ControlModifier | ui::ShiftModifier) && event.key == ui::key::letter('n')
             && canCreateFolder()) {
+            if (!m_expanded)
+                setExpanded(true);
             m_owner->beginNewFolder();
             return true;
         }
@@ -680,6 +788,7 @@ private:
     static void placeLabel(ui::Label* label, double x, double y, double width)
     {
         label->setColor(ui::Theme::current().text);
+        label->setElide(ui::Label::Elide::Right);
         const double height = label->sizeHint().height;
         label->setGeometry({x, y + centeredStart(kFieldHeight, height), width, height});
     }
@@ -715,7 +824,7 @@ private:
 
     void updateBusy()
     {
-        const bool listing = m_chooser.folder().status() == FolderModel::Status::Listing;
+        const bool listing = m_expanded && m_chooser.folder().status() == FolderModel::Status::Listing;
         busy->setVisible(listing);
         busy->setRunning(listing);
     }
@@ -727,6 +836,8 @@ private:
     std::vector<base::Subscription> m_subscriptions;
     ui::PointF m_press;
     bool m_pressActive = false;
+    bool m_expanded = true;
+    double m_footerY = 0;
 };
 
 ChooserWindow::ChooserWindow(FileChooser& chooser)
@@ -735,15 +846,12 @@ ChooserWindow::ChooserWindow(FileChooser& chooser)
     m_window = std::make_unique<ui::Window>();
     m_window->setTitle(chooser.title());
     // Not a file manager window: the dock does not count it, Quit and Hide leave it alone.
-    m_window->setSkipTaskbar(true);
-    m_window->setMinimumSize({kWidth, kHeight});
-    m_window->setMaximumSize({kWidth, kHeight});
-    m_window->resize({kWidth, kHeight});
-    // Opaque on purpose: the chooser does not use the blurred window background.
-    m_window->setBackgroundColor(ui::ColorId::Background);
+    m_window->setDialogAppearance();
+    m_window->setBackgroundColor(ui::ColorId::PanelBackground);
     auto root = std::make_unique<ChooserRoot>(this, chooser);
     m_root = root.get();
     m_window->setContentView(std::move(root));
+    m_root->setExpanded(!chooser.saveMode());
     m_window->onCloseRequested = [this] { m_chooser.cancel(); };
 
     const std::string parent = chooser.request()["parent_window"].toString();

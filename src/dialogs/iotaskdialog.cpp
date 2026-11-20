@@ -8,6 +8,7 @@
 #include "base/i18n.h"
 #include "base/locale.h"
 #include "ui/check_box.h"
+#include "ui/design_metrics.h"
 #include "ui/dialog_window.h"
 #include "ui/header_button.h"
 #include "ui/icon.h"
@@ -27,6 +28,8 @@ using cutefish::i18n::tr;
 using cutefish::i18n::trn;
 
 namespace fm {
+
+static constexpr double kConflictWidth = 416;
 
 static ui::Label* addLabel(ui::View* parent, double pixelSize, int weight, ui::ColorId color, bool wrap)
 {
@@ -78,7 +81,7 @@ ConflictDialog::Details ConflictDialog::fileDetails(const std::string& path)
 ConflictDialog::ConflictDialog()
     : FramelessDialog(tr("Replace Item"), false)
 {
-    setContentFactory([this] { return createContent(); }, 480, 20);
+    setContentFactory([this] { return createContent(); }, kConflictWidth, ui::design::dialogInset);
     onCloseRequested = [this] {
         // Dismissing is Stop: the task must not stay blocked on a question nobody sees.
         if (!m_answered)
@@ -160,16 +163,16 @@ std::unique_ptr<ui::View> ConflictDialog::createContent()
                              : tr("Do you want to replace it with the one you’re copying?");
 
     auto layout = std::make_unique<ui::ColumnLayout>();
-    layout->setSpacing(20);
+    layout->setSpacing(12);
     auto* row = layout->addChild<ui::RowLayout>();
-    row->setSpacing(16);
+    row->setSpacing(12);
     row->setLayoutHints({.fillWidth = true});
-    auto* icon = row->addChild<ui::ThemeIcon>(m_incoming.iconName.empty() ? "unknown" : m_incoming.iconName, 64);
-    icon->setLayoutHints({.preferredWidth = 64, .preferredHeight = 64, .verticalAlignment = ui::Alignment::Start});
+    auto* icon = row->addChild<ui::ThemeIcon>(m_incoming.iconName.empty() ? "unknown" : m_incoming.iconName, 40);
+    icon->setLayoutHints({.preferredWidth = 40, .preferredHeight = 40, .verticalAlignment = ui::Alignment::Start});
     auto* texts = row->addChild<ui::Column>();
     texts->setSpacing(4);
     texts->setLayoutHints({.fillWidth = true});
-    const double textWidth = 480 - 20 * 2 - 64 - 16;
+    const double textWidth = kConflictWidth - ui::design::dialogInset * 2 - 40 - 12;
     ui::Label* title = addLabel(texts, 13, 600, ui::ColorId::Text, true);
     title->setName("conflictHeading");
     title->setText(heading);
@@ -203,7 +206,7 @@ std::unique_ptr<ui::View> ConflictDialog::createContent()
         if (child->isVisible())
             rowWidth += child->sizeHint().width + actionSpacing;
     }
-    if (rowWidth > 480 - 20 * 2) {
+    if (rowWidth > kConflictWidth - ui::design::dialogInset * 2) {
         auto applyToAll = actions->takeChild(m_applyToAll);
         auto buttons = layout->takeChild(actions);
         layout->addChild(std::move(applyToAll));
@@ -221,7 +224,7 @@ IoTaskDialog::IoTaskDialog(OperationTaskPtr task)
     m_sourceCount = m_task->sourceCount();
     m_destinationName = m_task->destinationName();
 
-    setContentFactory([this] { return createContent(); }, 432, 16);
+    setContentFactory([this] { return createContent(); }, 416, ui::design::dialogInset);
     // Closing does not cancel: the dialog only goes out of sight, and comes
     // back for a later conflict or error.
     onCloseRequested = [this] { close(); };

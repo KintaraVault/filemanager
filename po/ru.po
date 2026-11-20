@@ -778,6 +778,15 @@ msgstr "Тип:"
 msgid "Location:"
 msgstr "Расположение:"
 
+msgid "Browse…"
+msgstr "Обзор…"
+
+msgid "Hide Folders"
+msgstr "Скрыть папки"
+
+msgid "Choose a name and location for the file."
+msgstr "Выберите имя файла и папку для сохранения."
+
 #: src/dialogs/propertiesdialog.cpp
 msgid "Size:"
 msgstr "Размер:"
@@ -1552,3 +1561,35 @@ msgstr "Добавить теги"
 
 msgid "Show:"
 msgstr "Показывать:"
+msgid "Go to Folder…"
+msgstr "Перейти к папке…"
+
+msgid "Go to Folder"
+msgstr "Переход к папке"
+
+msgid "Enter a folder path"
+msgstr "Введите путь к папке"
+
+msgid "Go to:"
+msgstr "Перейти к:"
+
+msgid "Folder not found."
+msgstr "Папка не найдена."
+
+msgid "No recent servers"
+msgstr "Нет недавних серверов"
+
+msgid "Server Password Required"
+msgstr "Требуется пароль сервера"
+
+msgid "Enter an SMB or SFTP server address without a password."
+msgstr "Введите адрес сервера SMB или SFTP без пароля."
+
+msgid "Choose an application to open “{name}”."
+msgstr "Выберите приложение, чтобы открыть «{name}»."
+
+msgid "Could not open the file with this application."
+msgstr "Не удалось открыть файл в этом приложении."
+
+msgid "Looking for applications…"
+msgstr "Поиск приложений…"

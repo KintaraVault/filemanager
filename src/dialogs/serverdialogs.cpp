@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "dialogs/serverdialogs.h"
+#include "core/mounts.h"
 #include "model/places.h"
 #include "views/style.h"
 
@@ -9,12 +10,14 @@
 #include "base/i18n.h"
 #include "base/strings.h"
 #include "ui/check_box.h"
+#include "ui/design_metrics.h"
 #include "ui/dialog_window.h"
 #include "ui/icon.h"
 #include "ui/keys.h"
 #include "ui/label.h"
 #include "ui/layout.h"
 #include "ui/painter.h"
+#include "ui/scroll_view.h"
 #include "ui/cell_layout.h"
 #include "ui/text_field.h"
 #include "ui/theme.h"
@@ -77,7 +80,7 @@ protected:
         const ui::Color fill = m_current ? style::textAlpha(0.08) : isHovered() ? style::textAlpha(0.04)
                                                                                  : ui::Color {0, 0, 0, 0};
         if (fill.a)
-            painter.drawRoundedRect(localRect(), {ui::Theme::current().smallRadius, 0, ui::Corners::Circular}, fill);
+            painter.drawSmoothRectangle(localRect(), ui::design::menuItemRadius, fill);
     }
 
     void hoverChanged() override
@@ -97,6 +100,8 @@ protected:
 
     void pointerPress(const ui::PointerEvent& event) override
     {
+        if (event.button != ui::MouseButton::Left)
+            return;
         if (isHovered() && m_removeRect.contains(event.position)) {
             m_removed(m_address);
             return;
@@ -122,10 +127,9 @@ public:
     Content(ConnectServerDialog* dialog)
         : m_dialog(dialog)
     {
-        setSpacing(12);
-        // The dialog pads the sides and the bottom; the top takes 16 more.
-        setPadding({0, 16, 0, 0});
+        setSpacing(10);
         field = addChild<ui::TextField>();
+        field->setName("serverAddress");
         // TRANSLATORS: example addresses; keep the two addresses as they are.
         field->setPlaceholder(tr("smb://server/share or sftp://user@server"));
         field->setSelectByMouse(true);
@@ -141,7 +145,16 @@ public:
         titleHints.margins.top = 4;
         recentTitle->setLayoutHints(titleHints);
         recent = addChild<ui::Column>();
-        recent->setLayoutHints({.fillWidth = true});
+        recent->setLayoutHints({.fillWidth = true, .preferredHeight = 112});
+        recent->setClipsChildren(true);
+        auto* scroll = recent->addChild<ui::ScrollView>();
+        scroll->setCornerRadius(ui::design::menuItemRadius);
+        scroll->setLayoutHints({.fillWidth = true, .preferredHeight = 112});
+        serversList = scroll->setContent<ui::Column>();
+        status = addChild<ui::Label>();
+        status->setName("serverStatus");
+        status->setColor(ui::ColorId::DisabledText);
+        status->setLayoutHints({.fillWidth = true});
 
         auto* actions = addChild<ui::RowLayout>();
         actions->setSpacing(8);
@@ -159,12 +172,17 @@ public:
     {
         // The rows go after the event, which may be one of theirs.
         std::vector<std::shared_ptr<View>> gone;
-        while (!recent->children().empty())
-            gone.push_back(recent->takeChild(recent->children().front().get()));
+        while (!serversList->children().empty())
+            gone.push_back(serversList->takeChild(serversList->children().front().get()));
         base::EventLoop::current()->post([gone] {});
         const auto servers = m_dialog->m_places.recentServers();
+        if (servers.empty()) {
+            auto* empty = serversList->addChild<ui::Label>(tr("No recent servers"));
+            empty->setColor(ui::ColorId::DisabledText);
+            empty->setLayoutHints({.fillWidth = true, .preferredHeight = ui::design::sidebarRowHeight});
+        }
         for (const std::string& server : servers) {
-            recent->addChild<RecentServer>(
+            serversList->addChild<RecentServer>(
                     server,
                     [this](const std::string& address, int clicks) {
                         if (clicks == 2)
@@ -177,33 +195,37 @@ public:
                         rebuild();
                     });
         }
-        recentTitle->setVisible(!servers.empty());
-        recent->setVisible(!servers.empty());
         updateRows();
         requestLayout();
     }
 
     void updateRows()
     {
-        for (const auto& child : recent->children())
-            static_cast<RecentServer*>(child.get())->setCurrent(false);
+        status->setText(tr("Enter an SMB or SFTP server address without a password."));
+        status->setVisible(false);
         const auto servers = m_dialog->m_places.recentServers();
-        for (size_t i = 0; i < servers.size() && i < recent->children().size(); ++i)
-            static_cast<RecentServer*>(recent->children()[i].get())->setCurrent(servers[i] == field->text());
+        for (size_t i = 0; i < servers.size() && i < serversList->children().size(); ++i)
+            static_cast<RecentServer*>(serversList->children()[i].get())->setCurrent(servers[i] == field->text());
         connect->setEnabled(!base::strings::trimmed(field->text()).empty());
     }
 
     void connectTo(const std::string& address)
     {
-        if (base::strings::trimmed(address).empty())
+        const auto location = MountsClient::normalizedAddress(address);
+        if (location.empty()) {
+            status->setVisible(true);
+            field->setFocus();
             return;
+        }
         m_dialog->m_dialog->close();
-        m_dialog->m_places.connectToServer(address);
+        m_dialog->m_places.connectToServer(location);
     }
 
     ui::TextField* field;
     ui::Label* recentTitle;
     ui::Column* recent;
+    ui::Column* serversList;
+    ui::Label* status;
     ui::DialogButton* connect;
 
 private:
@@ -213,7 +235,7 @@ private:
 ConnectServerDialog::ConnectServerDialog(ui::Window* parent, PlacesModel& places)
     : m_places(places)
 {
-    m_dialog = std::make_unique<ui::DialogWindow>(parent, tr("Connect to Server"), 420);
+    m_dialog = std::make_unique<ui::DialogWindow>(parent, tr("Connect to Server"), 460);
     // Cancel closes it.
     m_dialog->setCloseVisible(false);
     auto* content = m_dialog->setContent<Content>(this);
@@ -227,6 +249,7 @@ ConnectServerDialog::ConnectServerDialog(ui::Window* parent, PlacesModel& places
 }
 
 ConnectServerDialog::~ConnectServerDialog() = default;
+ui::Window* ConnectServerDialog::window() const { return m_dialog->window(); }
 
 void ConnectServerDialog::show()
 {
@@ -258,8 +281,6 @@ public:
     {
         const Request& request = dialog->m_request;
         setSpacing(12);
-        // The dialog pads the sides and the bottom; the top takes 16 more.
-        setPadding({0, 16, 0, 0});
 
         auto* message = addChild<ui::Label>(
                 request.retry ? format(tr("The name or password for “{address}” is incorrect. Try again."),
@@ -292,11 +313,12 @@ public:
         domain->setVisible(request.needsDomain);
         domain->setLayoutHints({.fillWidth = true});
         password = fields->addChild<ui::TextField>();
+        password->setName("serverPassword");
         password->setPlaceholder(tr("Password"));
         password->setEchoMode(ui::TextField::EchoMode::Password);
+        password->setPasswordCharacter("●");
         password->setLayoutHints({.fillWidth = true});
         remember = fields->addChild<ui::CheckBox>(tr("Remember this password"));
-        remember->setChecked(true);
         user->onAccepted = [this] { password->setFocus(); };
         domain->onAccepted = [this] { password->setFocus(); };
         password->onAccepted = [this] { accept(); };
@@ -365,7 +387,7 @@ ServerPasswordDialog::ServerPasswordDialog(ui::Window* parent, PlacesModel& plac
     : m_places(places)
     , m_request(std::move(request))
 {
-    m_dialog = std::make_unique<ui::DialogWindow>(parent, tr("Connect to Server"), 400);
+    m_dialog = std::make_unique<ui::DialogWindow>(parent, tr("Server Password Required"), 390);
     // Cancel closes it.
     m_dialog->setCloseVisible(false);
     auto* content = m_dialog->setContent<Content>(this);
@@ -383,6 +405,7 @@ ServerPasswordDialog::ServerPasswordDialog(ui::Window* parent, PlacesModel& plac
 }
 
 ServerPasswordDialog::~ServerPasswordDialog() = default;
+ui::Window* ServerPasswordDialog::window() const { return m_dialog->window(); }
 
 void ServerPasswordDialog::show()
 {
@@ -405,7 +428,7 @@ void ServerPasswordDialog::retranslate()
             focus = i;
     }
 
-    m_dialog->setTitle(tr("Connect to Server"));
+    m_dialog->setTitle(tr("Server Password Required"));
     m_content = m_dialog->setContent<Content>(this);
     m_content->guest->setChecked(guest);
     m_content->registered->setChecked(!guest);

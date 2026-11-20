@@ -14,6 +14,7 @@
 #include "views/pathbar.h"
 #include "views/sharepanel.h"
 #include "views/sidebar.h"
+#include "dialogs/gotofolder.h"
 #include "views/style.h"
 
 #include "base/event_loop.h"
@@ -843,6 +844,7 @@ void FolderWindow::addShortcuts()
     for (size_t i = 0; i < kViews.size(); ++i)
         window.addShortcut(ui::ControlModifier, '1' + i, [this, i] { selectView(kViews[i]); });
     window.addShortcut(ui::ControlModifier, 'k', [this] { m_sidebar->connectToServer(); });
+    window.addShortcut(ui::ControlModifier | ui::ShiftModifier, 'g', [this] { goToFolder(); });
 }
 
 void FolderWindow::selectView(int mode)
@@ -1148,7 +1150,7 @@ void FolderWindow::updateBlur()
     ui::toolbar_surface::applyWindowGlass(*m_window);
 }
 
-void FolderWindow::showContextMenu(ui::PointF position)
+void FolderWindow::showContextMenu(ui::PointF position, bool fromToolbar)
 {
     FolderPage* page = currentPage();
     if (!page)
@@ -1159,6 +1161,12 @@ void FolderWindow::showContextMenu(ui::PointF position)
     m_menu->addSeparator();
     const auto quick = m_menu->addItem(tr("Quick Look"), [this] { if (auto* p = currentPage()) p->quickLook(); });
     m_menu->setItemEnabled(quick, page->model().hasSelection());
+    if (fromToolbar) {
+        m_menu->addSeparator();
+        const auto location = m_menu->addItem(tr("Go to Folder…"), [this] { goToFolder(); });
+        m_menu->setItemKeyEquivalent(location, "g", ui::ControlModifier | ui::ShiftModifier);
+        m_menu->addSeparator();
+    }
     m_menu->addItem(tr("Show View Options"), [this] { toggleViewOptions(); });
     m_menu->addItem(tr("Customize Toolbar…"), [this] { setToolbarEditing(true); });
     m_menu->popup(m_window.get(), position);
@@ -1291,7 +1299,7 @@ void FolderWindow::toolbarAction(const std::string& id, ui::PointF position)
         }
         return;
     }
-    if (id == "action") { showContextMenu(position); return; }
+    if (id == "action") { showContextMenu(position, true); return; }
 
     m_menu = std::make_unique<ui::Menu>();
     if (id == "group") {
@@ -1583,8 +1591,8 @@ void FolderWindow::buildMainMenu()
     const size_t forward = go->addItem(tr("Forward"), onPage([](FolderPage& page) { page.goForward(); }));
     const size_t enclosing = go->addItem(tr("Enclosing Folder"), onPage([](FolderPage& page) { page.model().up(); }));
     go->addSeparator();
-    const size_t location = go->addItem(tr("Go to Location…"), [this] { m_pathBar->openEditor(); });
-    go->setItemKeyEquivalent(location, "l", control);
+    const size_t location = go->addItem(tr("Go to Folder…"), [this] { goToFolder(); });
+    go->setItemKeyEquivalent(location, "g", control | shift);
     const size_t server = go->addItem(tr("Connect to Server…"), [this] { m_sidebar->connectToServer(); });
     go->setItemKeyEquivalent(server, "k", control);
     go->onAboutToShow = [this, go, back, forward, enclosing, alt] {
@@ -1616,6 +1624,30 @@ void FolderWindow::buildMainMenu()
     };
 
     m_window->setMainMenu(m_mainMenu.get());
+}
+
+void FolderWindow::goToFolder()
+{
+    if (m_goToFolder)
+        return;
+    auto* page = currentPage();
+    if (!page)
+        return;
+    m_goToFolder = std::make_unique<GoToFolderDialog>(m_window.get(), page->model().url());
+    m_goToFolder->onFolder = [this](const std::string& url) {
+        if (currentPage()) {
+            currentPage()->model().setTagFilter(-1);
+            m_sidebar->setSelectedTag(-1);
+            currentPage()->openUrl(url);
+        }
+    };
+    m_goToFolder->onDone = [this] {
+        base::EventLoop::current()->post([this, alive = m_alive] {
+            if (*alive)
+                m_goToFolder.reset();
+        });
+    };
+    m_goToFolder->show();
 }
 
 void FolderWindow::openFolders(const std::vector<std::string>& paths)

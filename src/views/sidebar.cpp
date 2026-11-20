@@ -94,7 +94,8 @@ protected:
     {
         const auto& theme = ui::Theme::current();
         if (m_selected || m_hovered || hasFocus())
-            painter.drawSmoothRectangle(localRect(), theme.mediumRadius, style::textAlpha(m_selected ? 0.10 : 0.05));
+            painter.drawRoundedRect(localRect(), {ui::design::menuItemRadius, 0, ui::themeCorners()},
+                                    m_selected ? theme.highlight.withAlpha(.12) : style::textAlpha(.05));
         const double y = (geometry().height - 10) / 2;
         if (m_tag == filetags::all) {
             const ui::Color clear {0, 0, 0, 0};
@@ -226,7 +227,7 @@ protected:
     }
 
     double sideInset() const { return snap(kSmallSpacing * 1.5); }
-    double tagRowHeight() const { return snap(std::max(28.0, style::fontHeight() + 9)); }
+    double tagRowHeight() const { return snap(std::max(double(ui::design::sidebarRowHeight), style::fontHeight() + 9)); }
 
     void removeRow(const Row& row)
     {
@@ -252,7 +253,7 @@ protected:
         const ui::Window* window = this->window();
         const bool active = !window || window->isActive();
         const double inset = sideInset();
-        const double rowHeight = snap(std::max(27.0, style::fontHeight() + 10));
+        const double rowHeight = snap(std::max(double(ui::design::sidebarRowHeight), style::fontHeight() + 10));
         const double spacing = snap(3);
 
         styleSection(m_favorites);
@@ -369,12 +370,12 @@ protected:
             else if (pressed || dropTarget || menu)
                 fill = ui::color(ui::ColorId::ItemPressed);
             else if (checked)
-                fill = style::textAlpha(0.05);
+                fill = (!window() || window()->isActive()) ? theme.highlight.withAlpha(.12) : style::textAlpha(.07);
             const double border = dropTarget || rejected || menu ? 2 : 0;
             if (fill.a == 0 && border == 0)
                 continue;
             painter.drawRoundedRect({inset, row.rect.y, row.rect.width - inset * 2, row.rect.height},
-                                    {theme.mediumRadius, 0, ui::Corners::Circular}, fill, border,
+                                    {ui::design::menuItemRadius, 0, ui::themeCorners()}, fill, border,
                                     rejected ? style::kDanger : theme.highlight);
         }
 

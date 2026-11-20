@@ -3,18 +3,28 @@
 
 // Renders a browser window headless with its layout:
 //   filemanager-capture OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list|columns|gallery] [select=NAME...]]
+#include "chooser/chooserwindow.h"
+#include "chooser/filechooser.h"
 #include "model/foldermodel.h"
 #include "desktop/desktopview.h"
 #include "views/folderwindow.h"
 #include "views/pathbar.h"
 #include "dialogs/folderappearancedialog.h"
+#include "dialogs/gotofolder.h"
+#include "dialogs/iotaskdialog.h"
+#include "dialogs/openwithdialog.h"
+#include "dialogs/serverdialogs.h"
+#include "model/places.h"
 
+#include "base/application_registry.h"
 #include "base/event_loop.h"
 #include "base/paths.h"
 #include "base/timer.h"
 #include "base/url.h"
 #include "ui/application.h"
+#include "ui/dialog_window.h"
 #include "ui/test_input.h"
+#include "ui/text_field.h"
 #include "ui/theme.h"
 #include "ui/toolbar.h"
 #include "ui/window.h"
@@ -105,10 +115,87 @@ static int captureDesktop(ui::Application& app, const std::string& output, doubl
     return 0;
 }
 
+static int captureDialog(ui::Application& app, const std::string& output, const std::string& folder,
+                         double scale, const std::string& mode)
+{
+    auto save = [&](ui::Window* window) {
+        window->setScale(scale);
+        return window->grab().savePng(output) ? 0 : 1;
+    };
+    if (mode == "goto") {
+        fm::GoToFolderDialog dialog(nullptr, base::url::fromLocalFile(folder));
+        dialog.show();
+        if (auto* field = findView<ui::TextField>(dialog.window()->contentView()))
+            field->setText(folder + "/");
+        return save(dialog.window());
+    }
+    if (mode == "openwith") {
+        fm::OpenWithDialog dialog(folder + "/Notes.txt", "text/plain");
+        dialog.show();
+        auto& registry = base::ApplicationRegistry::instance();
+        if (registry.isLoading()) {
+            base::Timer timeout;
+            timeout.setSingleShot(true);
+            timeout.onTimeout = [&] { app.quit(); };
+            auto loaded = registry.changed.connect([&] { app.quit(); });
+            timeout.start(1500ms);
+            app.run();
+        }
+        return save(dialog.window());
+    }
+    if (mode == "replace") {
+        fm::ConflictDialog dialog;
+        dialog.open("copy", 1, folder + "/Notes.txt", folder + "/Notes.txt");
+        return save(dialog.window());
+    }
+    if (mode == "server" || mode == "password") {
+        fm::PlacesModel places;
+        if (mode == "password") {
+            fm::ServerPasswordDialog dialog(nullptr, places, {.address = "sftp://example.net", .user = "koifish",
+                                                            .anonymousAllowed = true});
+            dialog.show();
+            return save(dialog.window());
+        }
+        fm::ConnectServerDialog dialog(nullptr, places);
+        dialog.show();
+        if (auto* field = findView<ui::TextField>(dialog.window()->contentView()))
+            field->setText("smb://server/share");
+        return save(dialog.window());
+    }
+    if (mode == "confirm") {
+        ui::ConfirmDialog dialog(nullptr, "Replace the existing file?",
+                                 "A file with this name already exists. Replacing it cannot be undone.");
+        dialog.setCancelText("Cancel");
+        dialog.setConfirmText("Replace");
+        dialog.setDestructive(true);
+        dialog.show();
+        dialog.window()->setScale(scale);
+        return dialog.window()->grab().savePng(output) ? 0 : 1;
+    }
+
+    auto request = *base::json::Value::parse(R"({"current_name":"Notes.txt",
+        "filters":[{"name":"Text documents","rules":[{"type":0,"value":"*.txt"}]}]})");
+    request.insert("mode", mode == "save" ? "SaveFile" : "OpenFile");
+    request.insert("current_folder", folder);
+    fm::FileChooser chooser(std::move(request));
+    fm::ChooserWindow dialog(chooser);
+    dialog.window()->setScale(scale);
+    dialog.show();
+    base::Timer poll;
+    int ticks = 0;
+    poll.onTimeout = [&] {
+        if (chooser.folder().status() == fm::FolderModel::Status::Ready || ++ticks > 200)
+            app.quit();
+    };
+    poll.start(20ms);
+    app.run();
+    return dialog.window()->grab().savePng(output) ? 0 : 1;
+}
+
 int main(int argc, char** argv)
 {
     if (argc < 3) {
-        std::fprintf(stderr, "usage: %s OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list|columns|gallery] [share] [tabs] [tab=PATH] [style=0..3] [tone=0..2] [tint=0..9] [glass=0..1] [search=QUERY] [select=NAME]]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list|columns|gallery] [dialog=open|save|confirm|goto|server|password|openwith|replace] [share] [tabs] [tab=PATH] [style=0..3] [tone=0..2] [tint=0..9] [glass=0..1] [search=QUERY] [select=NAME]]\n", argv[0]);
         return 1;
     }
     const std::string output = argv[1];
@@ -125,6 +212,7 @@ int main(int argc, char** argv)
     bool share = false;
     int toolbarDisplay = 0;
     std::string appearance;
+    std::string dialog;
     std::string branch;
     std::string search;
     bool tabs = false;
@@ -169,6 +257,8 @@ int main(int argc, char** argv)
             toolbarDisplay = 2;
         else if (argument.starts_with("appearance="))
             appearance = argument.substr(11);
+        else if (argument.starts_with("dialog="))
+            dialog = argument.substr(7);
         else if (argument.starts_with("branch="))
             branch = argument.substr(7);
         else if (argument.starts_with("search="))
@@ -185,6 +275,9 @@ int main(int argc, char** argv)
     fm::Preferences::instance().setViewMethod(mode);
     fm::Preferences::instance().setToolbarDisplay(toolbarDisplay);
     fm::Preferences::instance().setOption(fm::Preferences::PreviewPane, inspector);
+    if (dialog == "open" || dialog == "save" || dialog == "confirm" || dialog == "goto"
+        || dialog == "server" || dialog == "password" || dialog == "openwith" || dialog == "replace")
+        return captureDialog(app, output, folder, scale, dialog);
 
     Host host;
     fm::FolderWindow window(&host, {folder, {}, {}, {}});

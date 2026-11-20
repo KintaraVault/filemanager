@@ -4,11 +4,15 @@
 #include "testutil.h"
 
 #include "chooser/filechooser.h"
+#include "chooser/chooserwindow.h"
 #include "core/preferences.h"
 
 #include "base/json.h"
 #include "base/url.h"
 #include "ui/application.h"
+#include "ui/dialog_window.h"
+#include "ui/test_input.h"
+#include "ui/window.h"
 
 #include <gtest/gtest.h>
 
@@ -71,6 +75,43 @@ TEST(FileChooserTest, OpenMultipleAndFilter)
     EXPECT_EQ(results[0]["uris"].size(), 2u);
     chooser.cancel();
     EXPECT_EQ(results.size(), 1u);
+}
+
+TEST(FileChooserTest, SaveBrowserExpandsWithoutLosingTheName)
+{
+    TemporaryDir directory;
+    FileChooser chooser(request(R"({"mode":"SaveFile","current_name":"notes.txt"})", directory.path()));
+    fm::ChooserWindow view(chooser);
+    view.show();
+    ui::Window& window = *view.window();
+    window.grab();
+    const auto find = [&](const char* name) {
+        for (const auto& child : window.contentView()->children()) {
+            if (child->name() == name)
+                return child.get();
+        }
+        return static_cast<ui::View*>(nullptr);
+    };
+    ui::View* toggle = find("toggleFileBrowser");
+    ui::View* files = find("fileList");
+    ASSERT_NE(toggle, nullptr);
+    ASSERT_NE(files, nullptr);
+    EXPECT_EQ(window.size(), (ui::SizeF{390, 318}));
+    EXPECT_FALSE(files->isVisible());
+
+    const auto clickToggle = [&] {
+        const ui::RectF rect = toggle->geometry();
+        ui::TestInput::click(window, {rect.x + rect.width / 2, rect.y + rect.height / 2});
+        window.grab();
+    };
+    clickToggle();
+    EXPECT_EQ(window.size(), (ui::SizeF{860, 520}));
+    EXPECT_TRUE(files->isVisible());
+    EXPECT_EQ(chooser.fileName(), "notes.txt");
+    clickToggle();
+    EXPECT_EQ(window.size(), (ui::SizeF{390, 318}));
+    EXPECT_FALSE(files->isVisible());
+    EXPECT_EQ(chooser.fileName(), "notes.txt");
 }
 
 TEST(FileChooserTest, NamesSortNumerically)

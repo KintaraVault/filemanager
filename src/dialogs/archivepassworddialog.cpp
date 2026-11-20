@@ -7,6 +7,7 @@
 #include "base/i18n.h"
 #include "ui/cell_layout.h"
 #include "ui/dialog_window.h"
+#include "ui/icon.h"
 #include "ui/keys.h"
 #include "ui/label.h"
 #include "ui/layout.h"
@@ -26,8 +27,8 @@ public:
         : m_dialog(dialog)
     {
         setSpacing(12);
-        // The dialog pads the sides and the bottom; the top takes 16 more.
-        setPadding({0, 16, 0, 0});
+        auto* icon = addChild<ui::ThemeIcon>("dialog-password", 32);
+        icon->setLayoutHints({.preferredWidth = 32, .preferredHeight = 32});
 
         auto* message = addChild<ui::Label>(dialog->m_retry
                                                     ? format(tr("The password for “{name}” is incorrect. Try again."),
@@ -39,8 +40,10 @@ public:
         message->setLayoutHints({.fillWidth = true});
 
         password = addChild<ui::TextField>();
+        password->setName("archivePassword");
         password->setPlaceholder(tr("Password"));
         password->setEchoMode(ui::TextField::EchoMode::Password);
+        password->setPasswordCharacter("●");
         password->setLayoutHints({.fillWidth = true});
         password->onAccepted = [this] { accept(); };
         password->onTextChanged = [this] { extract->setEnabled(!password->text().empty()); };
@@ -80,7 +83,7 @@ ArchivePasswordDialog::ArchivePasswordDialog(ui::Window* parent, FolderModel& mo
     , m_name(std::move(name))
     , m_retry(retry)
 {
-    m_dialog = std::make_unique<ui::DialogWindow>(parent, tr("Password Required"), 400);
+    m_dialog = std::make_unique<ui::DialogWindow>(parent, tr("Password Required"), 390);
     // Cancel closes it.
     m_dialog->setCloseVisible(false);
     m_content = m_dialog->setContent<Content>(this);
