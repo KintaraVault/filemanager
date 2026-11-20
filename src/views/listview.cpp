@@ -106,7 +106,7 @@ public:
         return handleAt(m_hover) >= 0 || m_dragging >= 0 ? ui::CursorShape::ResizeHorizontal
                                                          : ui::CursorShape::Default;
     }
-    void setBackground(std::optional<ui::Color> color) { m_background = color; }
+    void setOpaqueBackground(bool opaque) { m_opaqueBackground = opaque; }
 
 protected:
     struct Cell
@@ -191,8 +191,8 @@ protected:
 
     void paint(ui::Painter& painter) override
     {
-        if (m_background)
-            painter.fillRect(localRect(), *m_background);
+        if (m_opaqueBackground)
+            painter.fillRect(localRect(), ui::color(ui::ColorId::PanelBackground));
         const double left = m_list->leftMargin();
         const double right = m_list->rightMargin();
         painter.drawRoundedRect({left, geometry().height - 1, geometry().width - left - right, 1}, {},
@@ -295,7 +295,7 @@ private:
     FolderListView* m_list;
     ui::Label* m_titles[7];
     ui::Icon* m_chevrons[7];
-    std::optional<ui::Color> m_background;
+    bool m_opaqueBackground = false;
     ui::PointF m_hover {-100, -100};
     std::optional<ui::PointF> m_pressed;
     int m_dragging = -1;
@@ -756,7 +756,7 @@ void FolderListView::layout()
         m_columns.created = m_columns.accessed = false;
     }
     FolderView::layout();
-    m_header->setBackground(topInset() > 0 ? std::nullopt : std::optional(ui::Theme::current().secondBackground));
+    m_header->setOpaqueBackground(topInset() <= 0);
     m_header->setGeometry({-scrollPosition().x, topInset(), m_columns.availableWidth + leftMargin() + rightMargin(), ListColumns::headerHeight()});
     raiseChild(m_header);
     m_header->requestLayout();

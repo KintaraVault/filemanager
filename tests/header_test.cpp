@@ -26,6 +26,7 @@
 #include "ui/segmented_control.h"
 #include "ui/test_input.h"
 #include "ui/text_area.h"
+#include "ui/theme.h"
 #include "ui/toolbar.h"
 #include "ui/window.h"
 
@@ -77,6 +78,24 @@ static void dragBy(ui::Window& window, ui::PointF from, ui::PointF delta)
     ui::TestInput::press(window, from);
     ui::TestInput::movePointer(window, to);
     ui::TestInput::release(window, to);
+}
+
+TEST(HeaderTest, WallpaperTintsTheOpaqueFolderPane)
+{
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    WindowHost host;
+    fm::FolderWindow browser(&host, {directory.path(), {}, {}, {}}, {894, 572});
+    browser.show();
+    auto& window = browser.window();
+    const auto& theme = ui::Theme::current();
+    for (const ui::WallpaperTint tint : {ui::WallpaperTint::fromSample(217, 63, 47),
+                                         ui::WallpaperTint::fromSample(39, 91, 218), ui::WallpaperTint{}}) {
+        window.setWallpaperTint(tint);
+        const auto image = window.grab();
+        const ui::Color expected = ui::WallpaperTint::apply(theme.secondBackground, tint.forMode(theme.darkMode));
+        EXPECT_EQ(image.pixel(image.width() * 3 / 4, image.height() / 2), expected);
+    }
 }
 
 TEST(HeaderTest, SearchMovesToTheTrailingCapsuleAndRestoresTheToolbar)

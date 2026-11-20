@@ -15,6 +15,7 @@
 #include "base/event_loop.h"
 #include "base/i18n.h"
 #include "base/url.h"
+#include "ui/color_provider.h"
 #include "ui/header_backdrop.h"
 #include "ui/image_view.h"
 #include "ui/keys.h"
@@ -430,7 +431,7 @@ void FolderPage::layout()
 
 void FolderPage::paint(ui::Painter& painter)
 {
-    painter.fillRect(localRect(), ui::Theme::current().secondBackground);
+    painter.fillRect(localRect(), ui::color(ui::ColorId::PanelBackground));
     if (m_backgroundColor)
         painter.fillRect(m_backgroundBox, *m_backgroundColor);
 }

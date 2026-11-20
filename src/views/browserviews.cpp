@@ -13,6 +13,7 @@
 #include "base/event_loop.h"
 #include "base/i18n.h"
 #include "base/locale.h"
+#include "ui/color_provider.h"
 #include "ui/dialog_window.h"
 #include "ui/icon.h"
 #include "ui/image_view.h"
@@ -233,7 +234,7 @@ void FilePreviewPane::layout()
 
 void FilePreviewPane::paint(ui::Painter& painter)
 {
-    painter.fillRect(localRect(), ui::Theme::current().secondBackground);
+    painter.fillRect(localRect(), ui::color(ui::ColorId::PanelBackground));
     if (m_inspector)
         painter.fillRect({0, 0, 1, geometry().height}, style::textAlpha(0.13));
 }
