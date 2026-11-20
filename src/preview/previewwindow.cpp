@@ -13,6 +13,8 @@
 #include "ui/font_file.h"
 #include "ui/glyph_run.h"
 #include "ui/header_button.h"
+#include "ui/navigation_buttons.h"
+#include "ui/toolbar_surface.h"
 #include "ui/icon.h"
 #include "ui/image_view.h"
 #include "ui/keys.h"
@@ -113,10 +115,10 @@ protected:
 
     void paint(ui::Painter& painter) override
     {
-        const ui::Color tint = ui::color(ui::ColorId::HeaderButtonTint);
-        const double alpha = !isEnabled() ? 0.07 : m_pressed ? 0.21 : isHovered() ? 0.14 : 0.07;
-        painter.drawRoundedRect(localRect(), {geometry().height / 2, 0, ui::Corners::Circular},
-                                style::withAlpha(tint, alpha));
+        const bool dark = ui::Theme::current().darkMode;
+        ui::toolbar_surface::capsule(painter, localRect(), dark);
+        if (isEnabled() && (m_pressed || isHovered()))
+            ui::toolbar_surface::highlight(painter, localRect().shrunk(ui::Margins::all(2)), dark, m_pressed);
     }
 
     void hoverChanged() override { requestPaint(); }
@@ -159,11 +161,10 @@ public:
     explicit PreviewHeaderRow(PreviewController& controller)
         : m_controller(controller)
     {
-        previous = addChild<ui::HeaderButton>(std::string(), 32);
-        previous->setGlyph("chevron-left", 16);
+        m_navigation = addChild<ui::NavigationButtons>();
+        previous = m_navigation->back();
         previous->onClicked = [this] { m_controller.step(-1); };
-        next = addChild<ui::HeaderButton>(std::string(), 32);
-        next->setGlyph("chevron-right", 16);
+        next = m_navigation->forward();
         next->onClicked = [this] { m_controller.step(1); };
         position = addChild<ui::Label>();
         title = addChild<ui::Label>();
@@ -185,8 +186,7 @@ public:
     {
         const bool multiple = m_controller.items().size() > 1;
         m_multiple = multiple;
-        previous->setVisible(multiple);
-        next->setVisible(multiple);
+        m_navigation->setVisible(multiple);
         position->setVisible(multiple);
         previous->setEnabled(m_controller.currentIndex() > 0);
         next->setEnabled(m_controller.currentIndex() + 1 < int(m_controller.items().size()));
@@ -229,10 +229,8 @@ protected:
         const double height = geometry().height;
         double x = 4;
         if (m_multiple) {
-            previous->setGeometry({x, centeredStart(height, 32), 32, 32});
-            x += 32;
-            next->setGeometry({x, centeredStart(height, 32), 32, 32});
-            x += 32 + 4;
+            m_navigation->setGeometry({x, centeredStart(height, 32), 64, 32});
+            x += 64 + 4;
             const ui::SizeF hint = position->sizeHint();
             position->setGeometry({x, centeredStart(height, hint.height), hint.width, hint.height});
             x += hint.width;
@@ -250,6 +248,7 @@ protected:
 
 private:
     PreviewController& m_controller;
+    ui::NavigationButtons* m_navigation;
     bool m_multiple = false;
 };
 

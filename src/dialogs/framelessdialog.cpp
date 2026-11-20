@@ -201,7 +201,7 @@ void FramelessDialog::show()
     auto root = std::make_unique<Root>(m_closeButton, m_centeredHeader);
     m_root = root.get();
     m_window->setContentView(std::move(root));
-    m_window->setBackgroundColor(ui::ColorId::SecondBackground);
+    m_window->setBackgroundColor(ui::ColorId::PanelBackground);
     m_window->onCloseRequested = [this] {
         if (onCloseRequested)
             onCloseRequested();

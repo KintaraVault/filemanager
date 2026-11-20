@@ -91,7 +91,7 @@ ArchivePasswordDialog::ArchivePasswordDialog(ui::Window* parent, FolderModel& mo
         if (onDone)
             onDone();
     };
-    m_dialog->window()->setBackgroundColor(ui::ColorId::SecondBackground);
+    m_dialog->window()->setBackgroundColor(ui::ColorId::PanelBackground);
     m_dialog->window()->addShortcut(ui::NoModifier, ui::key::Escape, [this] { m_dialog->close(); });
     m_content->password->setFocus();
 }

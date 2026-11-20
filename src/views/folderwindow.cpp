@@ -68,9 +68,9 @@ static constexpr double kSmallSpacing = 6;
 static constexpr double kLargeSpacing = 12;
 static constexpr double kButtonSize = 32;
 static constexpr double kHeaderEndMargin = 19.0 / 3;
-static constexpr double kButtonsTopMargin = 4;
 // From the sidebar's edge to the back and forward plate.
-static constexpr double kNavigationStart = 10;
+static constexpr double kNavigationStart = 8;
+static constexpr double kNavigationTitleGap = 10;
 static constexpr double kBarHeight = 34;
 static constexpr double kMinimumWidth = 600;
 static constexpr double kMinimumContentWidth = kMinimumWidth - SideBar::kDefaultWidth;
@@ -300,7 +300,6 @@ public:
     HeaderRow()
     {
         navigation = addChild<ui::NavigationButtons>();
-        navigation->setToolbarAppearance(true);
         back = navigation->back();
         back->setName("backButton");
         forward = navigation->forward();
@@ -372,19 +371,21 @@ protected:
         // The plate is centred on the window controls' line.
         const auto hint = toolbar->sizeHint();
         const bool labels = toolbar->display() == ui::Toolbar::Display::IconsAndText;
-        const double toolbarY = centeredStart(geometry().height, hint.height);
+        const double toolbarY = (geometry().height - hint.height) / 2;
         const ui::SizeF plate = navigation->sizeHint();
-        navigation->setGeometry({x, toolbarY, plate.width, plate.height});
+        const double navigationY = toolbarY + (std::min(hint.height, 30.0) - plate.height) / 2;
+        navigation->setGeometry({x, navigationY, plate.width, plate.height});
         navigationCaption->setVisible(labels);
-        navigationCaption->setGeometry({x - 8, toolbarY + plate.height, plate.width + 16, 10});
-        x += plate.width + ui::window_controls::kSpacing;
+        navigationCaption->setGeometry({x - 8, navigationY + plate.height, plate.width + 16, 10});
+        x += plate.width + kNavigationTitleGap;
         const double end = right - kHeaderEndMargin;
         const auto& order = toolbar->order();
         const bool flexible = std::find(order.begin(), order.end(), ui::Toolbar::FlexibleSpace) != order.end();
         const double width = flexible ? std::max(hint.width, end - x - 140) : hint.width;
         const double toolbarX = std::max(x + 48, end - width);
         toolbar->setGeometry({toolbarX, toolbarY, std::max(0.0, end - toolbarX), hint.height});
-        pathBar->setGeometry({x + 4, std::max(0.0, toolbarY - 1), std::max(0.0, toolbarX - x - 10), kButtonSize});
+        pathBar->setGeometry({x, navigationY + (plate.height - kButtonSize) / 2,
+                              std::max(0.0, toolbarX - x - kSmallSpacing), kButtonSize});
     }
 };
 
@@ -460,7 +461,7 @@ public:
         tabBar->setPressedFeedback(true);
         newTab = addChild<ui::HeaderButton>("add", kNewTabButtonSize);
         newTab->setName("newTab");
-        newTab->setPlateAlphas({0.05, 0.10}, {0.05, 0.10});
+        newTab->setToolbarAppearance(true);
         scopeBar = addChild<SearchScopeBar>();
         trashBar = addChild<TrashBar>();
         header = addChild<ui::WindowHeader>(FolderWindow::kHeaderInset);

@@ -105,7 +105,7 @@ InstallDialog::InstallDialog(ui::Window* parent, std::string package, std::strin
         if (onDone)
             onDone();
     };
-    m_dialog->window()->setBackgroundColor(ui::ColorId::SecondBackground);
+    m_dialog->window()->setBackgroundColor(ui::ColorId::PanelBackground);
     m_dialog->window()->addShortcut(ui::NoModifier, ui::key::Escape, [this] { dismiss(); });
     m_changed = m_installer.changed.connect([this] { update(); });
 }

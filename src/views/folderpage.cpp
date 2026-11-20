@@ -249,7 +249,7 @@ protected:
     {
         const ui::RectF rect = localRect();
         if (m_backdrop) {
-            m_backdrop->setBaseColor(ui::Theme::current().secondBackground);
+            m_backdrop->setBaseColor(ui::ColorId::PanelBackground);
             m_backdrop->setGeometry(rect);
         }
         // Crumb text then starts where the scope bar's label does.
@@ -319,7 +319,7 @@ void FolderPage::createView(int mode)
     // Inside the view, so the list's column header stays above the blur.
     if (!m_columns && !m_gallery) {
         m_backdrop = view->addChild<ui::HeaderBackdrop>(view);
-        m_backdrop->setBaseColor(ui::Theme::current().secondBackground);
+        m_backdrop->setBaseColor(ui::ColorId::PanelBackground);
         m_backdrop->setSeparatorVisible(m_viewMethod != Preferences::List);
     }
     if (!m_pathStrip) {
@@ -411,7 +411,7 @@ void FolderPage::layout()
         } else {
             m_view->setGeometry({0, 0, width, std::max(0.0, bottom)});
             m_view->setTopInset(m_headerHeight + (m_viewMethod == Preferences::List ? kSmallSpacing : 0));
-            m_backdrop->setBaseColor(ui::Theme::current().secondBackground);
+            m_backdrop->setBaseColor(ui::ColorId::PanelBackground);
             m_backdrop->setVisible(m_view->topInset() > 0);
             m_backdrop->setGeometry({0, 0, width, m_view->headerHeight()});
         }

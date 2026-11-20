@@ -803,7 +803,7 @@ void ChooserWindow::beginNewFolder()
     // Cancel closes it.
     m_newFolder->setCloseVisible(false);
     if (ui::Window* window = m_newFolder->window())
-        window->setBackgroundColor(ui::ColorId::SecondBackground);
+        window->setBackgroundColor(ui::ColorId::PanelBackground);
 
     class Content : public ui::ColumnLayout
     {
