@@ -3,6 +3,7 @@
 
 #include "views/colors.h"
 #include "views/pathbar.h"
+#include "ui/toolbar_surface.h"
 #include "core/mounts.h"
 #include "model/foldermodel.h"
 #include "views/completionpopup.h"
@@ -398,14 +399,16 @@ PathBar::PathBar()
     m_editor->setName("pathEditor");
     m_editor->setFrameVisible(false);
     m_title = addChild<ui::Label>();
-    m_title->setWeight(650);
-    m_title->setFontSize(15);
+    m_title->setWeight(600);
+    m_title->setFontSize(14);
     m_title->setElide(ui::Label::Elide::Middle);
     m_title->setVerticallyCentered(true);
     m_title->setVisible(false);
     m_editor->setPlaceholder(tr("Search or Enter Path"));
     m_editor->setSelectByMouse(true);
     m_editor->setVisible(false);
+    m_searchGlyph = addChild<ui::Icon>("search");
+    m_searchGlyph->setVisible(false);
     auto* clear = addChild<ClearButton>();
     m_clear = clear;
     clear->onClicked = [this] {
@@ -473,9 +476,9 @@ bool PathBar::searching() const
     return m_model && !m_model->searchText().empty();
 }
 
-bool PathBar::isEditing() const
+bool PathBar::editorVisible() const
 {
-    return m_editing;
+    return m_editor->isVisible();
 }
 
 void PathBar::setFolderModel(FolderModel* model)
@@ -516,10 +519,23 @@ void PathBar::setFolderTitle(std::string title)
 void PathBar::updateVisibility()
 {
     const bool editorShown = m_editing || searching();
+    const bool wasShown = m_editor->isVisible();
     m_editor->setVisible(editorShown);
     m_crumbs->setVisible(!editorShown && !m_titleMode);
     m_title->setVisible(!editorShown && m_titleMode);
     m_clear->setVisible(editorShown && searching());
+    requestLayout();
+    requestPaint();
+    if (wasShown != editorShown && onEditorVisibilityChanged)
+        onEditorVisibilityChanged();
+}
+
+void PathBar::setSearchCapsule(bool capsule)
+{
+    if (m_searchCapsule == capsule)
+        return;
+    m_searchCapsule = capsule;
+    m_searchGlyph->setVisible(capsule);
     requestLayout();
     requestPaint();
 }
@@ -597,13 +613,16 @@ void PathBar::layout()
     m_title->setGeometry(rect);
 
     // Lower than the header buttons, centred on them.
-    const double height = 28;
+    const double height = m_searchCapsule ? 31 : 28;
     m_editor->setGeometry({0, centeredStart(rect.height, height), rect.width, height});
     m_editor->setTextColor(ui::color(FmColor::PathEditorText));
     const double clearX = rect.width - kSmallSpacing * 1.5 - 16;
     m_clear->setGeometry({clearX, centeredStart(rect.height, 16), 16, 16});
     static_cast<ui::Icon*>(m_clear)->setColor(theme.disabledText);
-    m_editor->setTextMargins(kLargeSpacing, m_clear->isVisible() ? rect.width - clearX + kSmallSpacing : kLargeSpacing);
+    m_searchGlyph->setGeometry({10, centeredStart(rect.height, 13), 13, 13});
+    m_searchGlyph->setColor(theme.disabledText);
+    m_editor->setTextMargins(m_searchCapsule ? 28 : kLargeSpacing,
+                              m_clear->isVisible() ? rect.width - clearX + kSmallSpacing : kLargeSpacing);
 }
 
 void PathBar::paint(ui::Painter& painter)
@@ -612,6 +631,12 @@ void PathBar::paint(ui::Painter& painter)
         return;
     const ui::Theme& theme = ui::Theme::current();
     const ui::RectF field = m_editor->geometry();
+    if (m_searchCapsule) {
+        ui::toolbar_surface::searchField(painter, field, theme.darkMode);
+        if (m_editor->hasFocus())
+            ui::toolbar_surface::searchFocus(painter, field, theme.highlight);
+        return;
+    }
     const ui::Color background = ui::color(FmColor::PathEditorBackground);
     // A search left showing keeps a faint outline, so it still reads as a field.
     const ui::Color border = m_editor->hasFocus() ? theme.highlight : style::textAlpha(0.15);

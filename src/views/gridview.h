@@ -45,7 +45,7 @@ public:
     double cellWidth() const { return m_grid.cellWidth; }
     double cellHeight() const { return m_cellHeight; }
     // The top margin under the bars.
-    double topMargin() const { return topInset() + 6; }
+    double topMargin() const;
     double bottomMargin() const { return 6 + bottomInset(); }
 
     // The cell sits on whole device pixels.
@@ -88,6 +88,7 @@ private:
 
     GridColumns m_grid;
     double m_cellHeight = 0;
+    double m_searchIconSize = 64;
     Preferences::ViewOptions m_options;
     base::Subscription m_preferences;
 };

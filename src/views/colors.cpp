@@ -23,7 +23,8 @@ void addFmColors(ColorMixer& mixer, const Theme& theme)
     mixer[FmColor::PathEditorText] = dark ? Color::rgb(0xffffff) : Color::rgb(0x000000);
     mixer[FmColor::PathEditorBackground] = dark ? lighter(ColorId::SecondBackground, 1.7)
                                                 : ColorRecipe(ColorId::SecondBackground);
-    mixer[FmColor::SearchScopeSelected] = withAlpha(ColorId::Highlight, dark ? 0.3 : 0.15);
+    mixer[FmColor::SearchScopeSelected] = withAlpha(ColorId::Text, dark ? 0.22 : 0.15);
+    mixer[ColorId::WindowTabBarTrack] = Color::rgb(dark ? 0xffffff : 0x000000).withAlpha(.09);
 }
 
 } // namespace fm

@@ -6,6 +6,7 @@
 #include "model/foldermodel.h"
 #include "desktop/desktopview.h"
 #include "views/folderwindow.h"
+#include "views/pathbar.h"
 #include "dialogs/folderappearancedialog.h"
 
 #include "base/event_loop.h"
@@ -46,13 +47,14 @@ public:
 
 } // namespace
 
-static ui::Toolbar* findToolbar(ui::View* root)
+template<class T>
+static T* findView(ui::View* root)
 {
-    if (auto* toolbar = dynamic_cast<ui::Toolbar*>(root))
-        return toolbar;
+    if (auto* view = dynamic_cast<T*>(root))
+        return view;
     for (const auto& child : root->children()) {
-        if (auto* toolbar = findToolbar(child.get()))
-            return toolbar;
+        if (auto* view = findView<T>(child.get()))
+            return view;
     }
     return nullptr;
 }
@@ -106,7 +108,7 @@ static int captureDesktop(ui::Application& app, const std::string& output, doubl
 int main(int argc, char** argv)
 {
     if (argc < 3) {
-        std::fprintf(stderr, "usage: %s OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list|columns|gallery] [share] [late-work-area] [select=NAME]]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s OUT.png FOLDER [WIDTH HEIGHT SCALE [dark] [list|columns|gallery] [share] [tabs] [tab=PATH] [style=0..3] [tone=0..2] [tint=0..9] [glass=0..1] [search=QUERY] [select=NAME]]\n", argv[0]);
         return 1;
     }
     const std::string output = argv[1];
@@ -124,6 +126,10 @@ int main(int argc, char** argv)
     int toolbarDisplay = 0;
     std::string appearance;
     std::string branch;
+    std::string search;
+    bool tabs = false;
+    std::vector<std::string> tabPaths;
+    ui::AppearanceStyle style;
     std::vector<std::string> select;
     for (int i = 6; i < argc; ++i) {
         const std::string argument = argv[i];
@@ -145,6 +151,18 @@ int main(int argc, char** argv)
             options = true;
         else if (argument == "share")
             share = true;
+        else if (argument == "tabs")
+            tabs = true;
+        else if (argument.starts_with("tab="))
+            tabPaths.push_back(argument.substr(4));
+        else if (argument.starts_with("style="))
+            style.icons = ui::appearance_style::iconStyle(std::atoi(argument.c_str() + 6));
+        else if (argument.starts_with("tone="))
+            style.tone = ui::appearance_style::iconTone(std::atoi(argument.c_str() + 5));
+        else if (argument.starts_with("tint="))
+            style.tintColor = ui::appearance_style::colorIndex(std::atoi(argument.c_str() + 5));
+        else if (argument.starts_with("glass="))
+            style.glass = ui::appearance_style::glassValue(std::atof(argument.c_str() + 6));
         else if (argument == "toolbar-labels")
             toolbarDisplay = 1;
         else if (argument == "toolbar-text")
@@ -153,12 +171,14 @@ int main(int argc, char** argv)
             appearance = argument.substr(11);
         else if (argument.starts_with("branch="))
             branch = argument.substr(7);
+        else if (argument.starts_with("search="))
+            search = argument.substr(7);
         else if (argument.starts_with("select="))
             select.push_back(argument.substr(7));
     }
 
     ui::Application app(argc, argv, ui::Application::Platform::Headless);
-    ui::Theme::setCurrent(dark ? ui::Theme::dark() : ui::Theme::light());
+    ui::Theme::setCurrent(dark ? ui::Theme::dark() : ui::Theme::light(), style);
     if (folder == "desktop")
         return captureDesktop(app, output, width, height, scale, select, lateWorkArea);
     fm::Preferences::instance().setReadOnly(true);
@@ -168,6 +188,12 @@ int main(int argc, char** argv)
 
     Host host;
     fm::FolderWindow window(&host, {folder, {}, {}, {}});
+    if (tabs)
+        window.openTab(base::url::fromLocalFile("/"));
+    for (const auto& path : tabPaths)
+        window.openTab(base::url::fromLocalFile(path));
+    if (window.tabCount() > 1)
+        window.setCurrentTab(0);
     window.window().setScale(scale);
     window.window().resize({width, height});
     window.show();
@@ -180,7 +206,8 @@ int main(int argc, char** argv)
     int ticks = 0;
     poll.onTimeout = [&] {
         fm::FolderPage* page = window.currentPage();
-        if ((page && page->model().status() == fm::FolderModel::Status::Ready) || ++ticks > 200)
+        if ((page && page->model().status() == fm::FolderModel::Status::Ready && !page->model().searchBusy())
+                || ++ticks > 200)
             app.quit();
     };
     poll.start(20ms);
@@ -193,6 +220,14 @@ int main(int argc, char** argv)
     }
 
     if (fm::FolderPage* page = window.currentPage()) {
+        if (!search.empty()) {
+            page->model().setSearchHome(false);
+            page->model().setSearchText(search);
+            if (auto* field = findView<fm::PathBar>(window.window().contentView()))
+                field->openSearch();
+            ticks = 0;
+            app.run();
+        }
         for (const std::string& name : select) {
             const int row = page->model().rowForUrl(base::url::fromLocalFile(directory + "/" + name));
             page->model().setSelected(row);
@@ -213,7 +248,7 @@ int main(int argc, char** argv)
     // (thumbnails, folder sizes) arrives from workers.
     window.window().grab();
     if (share) {
-        auto* toolbar = findToolbar(window.window().contentView());
+        auto* toolbar = findView<ui::Toolbar>(window.window().contentView());
         auto* button = toolbar ? toolbar->itemView("share") : nullptr;
         if (!button)
             return 1;

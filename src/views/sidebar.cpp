@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "views/sidebar.h"
-#include "views/foldericon.h"
 #include "core/preferences.h"
 #include "core/filetags.h"
 #include "dialogs/serverdialogs.h"
@@ -139,9 +138,9 @@ public:
     double heightForWidth(double) const override
     {
         PlacesModel& places = m_sidebar->places();
-        const double rowHeight = snap(std::max(32.0, style::fontHeight() + 12));
+        const double rowHeight = snap(std::max(27.0, style::fontHeight() + 10));
         const double spacing = snap(3);
-        double y = Preferences::instance().option(Preferences::SidebarFavorites) ? snap(32) : 0;
+        double y = Preferences::instance().option(Preferences::SidebarFavorites) ? snap(28) : 0;
         bool any = false;
         std::string category = "Favorites";
         for (int i = 0; i < places.count(); ++i) {
@@ -152,14 +151,14 @@ public:
                 category = places.at(i).category;
                 // An unnamed section takes no room.
                 if (!category.empty())
-                    y += snap(36);
+                    y += snap(28);
             }
             y += rowHeight + spacing;
         }
         if (any)
             y -= spacing;
         if (Preferences::instance().option(Preferences::SidebarTags))
-            y += snap(32) + m_tagButtons.size() * tagRowHeight();
+            y += snap(28) + m_tagButtons.size() * tagRowHeight();
         return y + snap(kSmallSpacing);
     }
 
@@ -172,7 +171,7 @@ public:
         }
         while (m_rows.size() < size_t(places.count())) {
             Row row;
-            row.icon = addChild<FolderThemeIcon>(std::string(), 20);
+            row.icon = addChild<ui::ThemeIcon>(std::string(), 20);
             row.icon->setThemeSize(20);
             row.label = addChild<ui::Label>();
             row.label->setElide(ui::Label::Elide::Right);
@@ -210,7 +209,7 @@ public:
 protected:
     struct Row
     {
-        FolderThemeIcon* icon = nullptr;
+        ui::ThemeIcon* icon = nullptr;
         ui::Label* label = nullptr;
         ui::ThemeIcon* eject = nullptr;
         ui::Label* section = nullptr;
@@ -240,8 +239,8 @@ protected:
 
     static void styleSection(ui::Label* label)
     {
-        label->setFontSize(9 * 4.0 / 3);
-        label->setWeight(700);
+        label->setFontSize(11);
+        label->setWeight(620);
         label->setColor(ui::Theme::current().disabledText);
         label->setVerticallyCentered(true);
     }
@@ -253,13 +252,13 @@ protected:
         const ui::Window* window = this->window();
         const bool active = !window || window->isActive();
         const double inset = sideInset();
-        const double rowHeight = snap(std::max(32.0, style::fontHeight() + 12));
+        const double rowHeight = snap(std::max(27.0, style::fontHeight() + 10));
         const double spacing = snap(3);
 
         styleSection(m_favorites);
         const bool favorites = Preferences::instance().option(Preferences::SidebarFavorites);
         m_favorites->setVisible(favorites);
-        const double headerHeight = favorites ? snap(32) : 0;
+        const double headerHeight = favorites ? snap(28) : 0;
         m_favorites->setGeometry({inset + kSmallSpacing, 0, std::max(0.0, width - inset - kSmallSpacing), headerHeight});
 
         double y = headerHeight;
@@ -283,7 +282,7 @@ protected:
                 styleSection(row.section);
                 row.section->setText(tr(category.c_str()));
                 row.section->setVisible(true);
-                const double height = snap(36);
+                const double height = snap(28);
                 const double left = snap(inset + kSmallSpacing);
                 row.section->setGeometry({left, y, std::max(0.0, width - left - kSmallSpacing), height});
                 y += height;
@@ -294,10 +293,18 @@ protected:
 
             row.rect = {0, y, width, rowHeight};
             const bool checked = i == m_selected;
-            const ui::Color color = !active ? theme.disabledText : checked ? theme.highlight : theme.text;
+            const auto& appearance = ui::Theme::appearanceStyle();
+            const bool location = place.category == "Locations" || place.isDevice();
+            ui::Color glyphColor = location ? theme.disabledText : theme.highlight;
+            if (appearance.icons == ui::IconStyle::Clear)
+                glyphColor = theme.text.withAlpha(.72);
+            else if (!location && appearance.icons == ui::IconStyle::Tinted)
+                glyphColor = ui::appearance_style::color(appearance.tintColor, theme.highlight);
+            if (!active)
+                glyphColor = theme.disabledText;
+            const ui::Color color = !active ? theme.disabledText : theme.text;
             row.icon->setIconName(place.iconName);
-            row.icon->setFolderPath(!place.isDevice() ? base::url::toLocalFile(place.url).value_or(std::string()) : std::string());
-            row.icon->setColor(color);
+            row.icon->setColor(glyphColor);
             const double iconX = snap(inset + kSmallSpacing);
             const double iconSize = snap(20);
             row.icon->setGeometry({iconX, y + snap((rowHeight - iconSize) / 2), iconSize, iconSize});
@@ -331,8 +338,8 @@ protected:
         const double left = inset + kSmallSpacing;
         styleSection(m_tags);
         m_tags->setVisible(tags);
-        m_tags->setGeometry({left, y, std::max(0.0, width - left * 2), snap(32)});
-        y += snap(32);
+        m_tags->setGeometry({left, y, std::max(0.0, width - left * 2), snap(28)});
+        y += snap(28);
         for (auto* tag : m_tagButtons) {
             tag->setVisible(tags);
             tag->setGeometry({inset, y, std::max(0.0, width - inset * 2), tagRowHeight()});
@@ -880,15 +887,20 @@ void SideBar::layout()
 
 void SideBar::paint(ui::Painter& painter)
 {
-    // A step below the folder view's colour in both modes.
-    painter.fillRect(localRect(), style::withAlpha(ui::Theme::current().background, 0.7));
+    // Neutral sidebar stock; stay translucent so the material can pick up
+    // colour from the scene behind it rather than from the app's base palette.
+    const bool dark = ui::Theme::current().darkMode;
+    const bool opaque = ui::Theme::appearanceStyle().reduceTransparency;
+    painter.fillRect(localRect(), ui::Color::rgb(dark ? 0x2b2b2c : opaque ? 0xededec : 0xf0f0ef)
+                                    .withAlpha(opaque ? 1 : .93));
 
     // The header backdrop's hairline, down the edge: 0.5 px, below 2x a
     // device pixel with its alpha scaled to the same weight.
     const double scale = painter.scale();
     const double devicePixels = std::max(1.0, std::round(0.5 * scale));
     const double lineWidth = devicePixels / scale;
-    const ui::Color separator = ui::color(ui::ColorId::HeaderSeparator);
+    // A narrow inside light edge rather than a dark line between the panes.
+    const ui::Color separator = ui::Color::rgb(0xffffff).withAlpha(dark ? .09 : .60);
     painter.drawRoundedRect({geometry().width - lineWidth, 0, lineWidth, geometry().height}, {0},
                             separator.withAlpha(separator.a / 255.0 * 0.5 * scale / devicePixels));
 }

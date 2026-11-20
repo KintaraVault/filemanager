@@ -10,6 +10,7 @@
 #include "views/folderwindow.h"
 #include "views/gridview.h"
 #include "views/listview.h"
+#include "views/pathbar.h"
 #include "views/renameeditor.h"
 
 #include "base/url.h"
@@ -72,6 +73,43 @@ static void dragBy(ui::Window& window, ui::PointF from, ui::PointF delta)
     ui::TestInput::press(window, from);
     ui::TestInput::movePointer(window, to);
     ui::TestInput::release(window, to);
+}
+
+TEST(HeaderTest, SearchMovesToTheTrailingCapsuleAndRestoresTheToolbar)
+{
+    fmtest::TemporaryDir directory;
+    ASSERT_TRUE(directory.isValid());
+    WindowHost host;
+    fm::FolderWindow browser(&host, {directory.path(), {}, {}, {}}, {894, 572});
+    browser.show();
+    auto& window = browser.window();
+    window.grab();
+    auto* root = window.contentView();
+    auto* field = dynamic_cast<fm::PathBar*>(findView(root, "pathBar"));
+    auto* toolbar = dynamic_cast<ui::Toolbar*>(findView(root, "toolbar"));
+    auto* title = dynamic_cast<ui::Label*>(findView(root, "searchTitle"));
+    ASSERT_TRUE(field && toolbar && title);
+    const auto originalOrder = toolbar->order();
+    field->openSearch();
+    browser.currentPage()->model().setSearchText("project");
+    window.grab();
+    EXPECT_EQ(browser.currentPage()->model().searchText(), "project");
+    EXPECT_TRUE(title->isVisible());
+    EXPECT_GT(field->geometry().x, title->geometry().right());
+    EXPECT_EQ(toolbar->itemView("search"), nullptr);
+
+    window.resize({610, 572});
+    window.grab();
+    EXPECT_FALSE(title->isVisible());
+    EXPECT_TRUE(field->editorVisible());
+    EXPECT_EQ(toolbar->order(), originalOrder);
+
+    field->endSearch();
+    window.resize({894, 572});
+    window.grab();
+    EXPECT_FALSE(title->isVisible());
+    EXPECT_FALSE(field->editorVisible());
+    EXPECT_EQ(toolbar->order(), originalOrder);
 }
 
 TEST(HeaderTest, TahoeToolbarGroupsActionsAndRestylesWithoutChangingTheirTargets)
@@ -397,14 +435,16 @@ TEST(HeaderTest, ViewOptionsSwitchModesAndApplyToTheCurrentFolder)
     const auto gridHeight = panel->size().height;
     auto* page = window.currentPage();
     auto options = page->viewOptions();
-    options.iconSize = 128;
+    const int originalSize = options.iconSize;
+    const int customSize = originalSize == 96 ? 128 : 96;
+    options.iconSize = customSize;
     options.spacing = 32;
     options.setOption(fm::Preferences::IconRight, true);
     page->setViewOptions(options);
     window.window().grab();
     auto* grid = dynamic_cast<fm::FolderGridView*>(page->view());
     ASSERT_NE(grid, nullptr);
-    EXPECT_EQ(grid->iconSize(), 128);
+    EXPECT_EQ(grid->iconSize(), customSize);
     EXPECT_EQ(grid->options().spacing, 32);
     EXPECT_TRUE(grid->options().option(fm::Preferences::IconRight));
     prefs.setViewMethod(fm::Preferences::List);
@@ -424,9 +464,9 @@ TEST(HeaderTest, ViewOptionsSwitchModesAndApplyToTheCurrentFolder)
         EXPECT_EQ(page->viewMethod(), mode);
     }
     page->openUrl(next);
-    EXPECT_NE(page->viewOptions().iconSize, 128);
+    EXPECT_EQ(page->viewOptions().iconSize, originalSize);
     page->goBack();
-    EXPECT_EQ(page->viewOptions().iconSize, 128);
+    EXPECT_EQ(page->viewOptions().iconSize, customSize);
     ASSERT_TRUE(panel->onCloseRequested);
     panel->onCloseRequested();
     EXPECT_EQ(window.viewOptionsWindow(), nullptr);

@@ -35,7 +35,7 @@ class SideBar : public ui::View
 {
 public:
     // Dragging its edge resizes it in this range.
-    static constexpr double kDefaultWidth = 190;
+    static constexpr double kDefaultWidth = 152;
     static constexpr double kMinimumWidth = 140;
     static constexpr double kMaximumWidth = 400;
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "views/gridview.h"
+#include "core/filetags.h"
 #include "core/preferences.h"
 #include "core/dates.h"
 #include "model/foldermodel.h"
@@ -17,6 +18,7 @@
 #include "ui/window.h"
 
 #include <algorithm>
+#include <bit>
 #include <charconv>
 #include <cmath>
 
@@ -30,6 +32,8 @@ static constexpr double kMinimumIconSize = 22;
 // The narrowest cell, which holds a name of 100 px.
 static constexpr double kMinimumCellWidth = 104;
 static constexpr double kLabelInset = 4;
+static constexpr double kTagDiameter = 9;
+static constexpr double kTagStep = 6;
 // A column takes its cell and 10 px; the width keeps another 6.
 static constexpr double kEndMargin = 6;
 static constexpr double kSectionHeight = 32;
@@ -98,7 +102,27 @@ protected:
         m_info->setTextAlignment(alignment);
         m_info->setColor(ui::Theme::current().disabledText);
         m_info->setText(info ? formatSize(item.size) : std::string());
+        m_tags = item.isLocalFile() && !item.isLink ? filetags::read(item.path) : 0;
         return renamed;
+    }
+
+    void paint(ui::Painter& painter) override
+    {
+        IconItem::paint(painter);
+        if (!m_tags || !m_label->isVisible())
+            return;
+        const auto label = labelRect();
+        const double y = label.y + (std::min(label.height, m_grid->options().textSize * 1.35) - kTagDiameter) / 2;
+        double x = label.x - tagGutter();
+        int remaining = 3;
+        for (size_t i = 0; i < filetags::colors.size() && remaining; ++i) {
+            if (!(m_tags & (1 << i)))
+                continue;
+            painter.drawSmoothRectangle({x, y, kTagDiameter, kTagDiameter}, kTagDiameter / 2,
+                                        ui::Color::rgb(filetags::colors[i]), 1, ui::Theme::current().background);
+            x += kTagStep;
+            --remaining;
+        }
     }
 
     void layout() override
@@ -118,9 +142,10 @@ protected:
             m_thumbnailTint->setOpacity(0.5 * (m_hidden ? 0.5 : 1.0));
         }
 
-        const double labelWidth = std::max(0.0, cellWidth - kLabelInset - (right ? iconItemWidth : 0));
+        const double gutter = tagGutter();
+        const double labelWidth = std::max(0.0, cellWidth - kLabelInset - gutter - (right ? iconItemWidth : 0));
         const double labelHeight = m_label->heightForWidth(labelWidth);
-        const double x = right ? iconItemWidth : centeredStart(width, labelWidth);
+        const double x = right ? iconItemWidth + gutter : centeredStart(width, labelWidth) + gutter / 2;
         const double y = right ? std::max(kSmallSpacing, (geometry().height - labelHeight - (m_info->isVisible() ? 14 : 0)) / 2)
                                : kSmallSpacing + iconSize + kSmallSpacing;
         m_label->setGeometry({x, y, labelWidth, labelHeight});
@@ -128,9 +153,16 @@ protected:
     }
 
 private:
+    double tagGutter() const
+    {
+        const int count = std::min(3, std::popcount(m_tags));
+        return count ? kTagDiameter + (count - 1) * kTagStep + 4 : 0;
+    }
+
     FolderGridView* m_grid;
     ThumbnailTint* m_thumbnailTint;
     ui::Label* m_info;
+    uint8_t m_tags = 0;
 };
 
 FolderGridView::FolderGridView(FolderModel& model)
@@ -153,6 +185,11 @@ void FolderGridView::setIconSize(double size)
     if (m_iconSize == size)
         return;
     auto options = Preferences::instance().viewOptions(model().resolvedUrl(), Preferences::Grid);
+    if (!model().searchText().empty() && !options.option(Preferences::IconRight)) {
+        m_searchIconSize = size;
+        requestLayout();
+        return;
+    }
     options.iconSize = size;
     Preferences::instance().setViewOptions(model().resolvedUrl(), Preferences::Grid, options);
 }
@@ -166,7 +203,14 @@ void FolderGridView::increaseIconSize()
 void FolderGridView::decreaseIconSize()
 {
     setIconSize(m_iconSize <= kMinimumIconSize ? kMinimumIconSize
-                                               : std::max(kMinimumIconSize, m_iconSize - m_iconSize * 0.1));
+                                                : std::max(kMinimumIconSize, m_iconSize - m_iconSize * 0.1));
+}
+
+double FolderGridView::topMargin() const
+{
+    // The icon view has a gutter under the toolbar. Search results start
+    // closer to the scope strip, as do folders shown with small icons.
+    return topInset() + (model().searchText().empty() && m_iconSize >= 96 ? 17 : 6);
 }
 
 void FolderGridView::updateMetrics()
@@ -175,11 +219,19 @@ void FolderGridView::updateMetrics()
     const double fromRowHeight = m_cellHeight;
 
     m_options = Preferences::instance().viewOptions(model().resolvedUrl(), Preferences::Grid);
+    const bool search = !model().searchText().empty();
+    if (search && !m_options.option(Preferences::IconRight)) {
+        m_options.iconSize = m_searchIconSize;
+        m_options.spacing = std::min(m_options.spacing, 8);
+    }
     m_iconSize = m_options.iconSize;
     const bool right = m_options.option(Preferences::IconRight);
     m_grid = GridColumns::forWidth(geometry().width, m_iconSize, m_options.spacing, right);
+    if (search)
+        m_grid.gap = std::min(8.0, m_grid.gap);
     const double labelArea = m_options.textSize * 2.45 + (m_options.option(Preferences::IconInfo) ? 15 : 0);
-    m_cellHeight = (right ? std::max(m_iconSize, labelArea) : m_iconSize + labelArea) + 14 + m_options.spacing;
+    const double padding = !search && !right && m_iconSize >= 96 ? 16 : 14;
+    m_cellHeight = (right ? std::max(m_iconSize, labelArea) : m_iconSize + labelArea) + padding + m_options.spacing;
 
     if (fromRowHeight > 0)
         reflow(fromColumns, fromRowHeight);

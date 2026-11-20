@@ -97,13 +97,14 @@ public:
     void setFolderModel(FolderModel* model);
     void updateUrl(const std::string& url);
     void setFolderTitle(std::string title);
+    void setSearchCapsule(bool capsule);
     // The editor's placeholder; the crumbs follow the next updateUrl().
     void retranslate();
     void openEditor();
     void openSearch();
     void closeEditor();
     void endSearch();
-    bool isEditing() const;
+    bool editorVisible() const;
 
     std::function<void(const std::string& path)> onItemClicked;
     std::function<void(const std::string& path)> onEditorAccepted;
@@ -111,6 +112,7 @@ public:
     std::function<void(const std::string& path)> onOpenInNewWindow;
     // The editor gave the keys back to the folder view.
     std::function<void()> onFinished;
+    std::function<void()> onEditorVisibilityChanged;
 
     bool acceptsPointer() const override { return true; }
 
@@ -138,6 +140,8 @@ private:
     bool m_titleMode = false;
     ui::TextField* m_editor;
     ui::Icon* m_clear;
+    ui::Icon* m_searchGlyph;
+    bool m_searchCapsule = false;
     base::Timer m_debounce;
     std::unique_ptr<CompletionPopup> m_completion;
     bool m_dragged = false;

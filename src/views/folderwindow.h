@@ -87,9 +87,9 @@ public:
     void installBundleRunner(const std::string& path) override;
     void notify(const std::string& message) override;
 
-    // The header's height: buttons 32 with 4 above and below.
-    static constexpr double kHeaderInset = 40;
-    static constexpr double kTabBarHeight = 38;
+    // The header leaves room around the toolbar capsules, independent of the tab track.
+    static constexpr double kHeaderInset = 46;
+    static constexpr double kTabBarHeight = 34;
 
 private:
     friend class FolderWindowRoot;

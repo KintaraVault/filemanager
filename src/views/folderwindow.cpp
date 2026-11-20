@@ -40,6 +40,7 @@
 #include "ui/theme.h"
 #include "ui/toast.h"
 #include "ui/toolbar.h"
+#include "ui/toolbar_surface.h"
 #include "ui/drag.h"
 #include "ui/window.h"
 #include "ui/window_controls.h"
@@ -69,9 +70,11 @@ static constexpr double kLargeSpacing = 12;
 static constexpr double kButtonSize = 32;
 static constexpr double kHeaderEndMargin = 19.0 / 3;
 // From the sidebar's edge to the back and forward plate.
-static constexpr double kNavigationStart = 8;
+static constexpr double kNavigationStart = 7;
 static constexpr double kNavigationTitleGap = 10;
+static constexpr ui::SizeF kNavigationPlate{71, 34};
 static constexpr double kBarHeight = 34;
+static constexpr double kScopeBarHeight = 29;
 static constexpr double kMinimumWidth = 600;
 static constexpr double kMinimumContentWidth = kMinimumWidth - SideBar::kDefaultWidth;
 static constexpr double kNewTabButtonSize = 28;
@@ -102,6 +105,10 @@ public:
         m_home = addChild<ui::Label>(tr("Home"));
         m_folder = addChild<ui::Label>();
         m_folder->setElide(ui::Label::Elide::Middle);
+        for (auto* label : {m_label, m_home, m_folder}) {
+            label->setFontSize(11.5);
+            label->setWeight(650);
+        }
         m_busy = addChild<ui::BusyIndicator>();
     }
 
@@ -133,8 +140,7 @@ protected:
     {
         const ui::Theme& theme = ui::Theme::current();
         const double height = geometry().height;
-        const double scopeHeight = 24;
-        double x = kSmallSpacing * 1.5 + kSmallSpacing;
+        double x = 10;
         m_label->setColor(theme.disabledText);
         const ui::SizeF label = m_label->sizeHint();
         m_label->setGeometry({x, centeredStart(height, label.height), std::ceil(label.width), label.height});
@@ -152,7 +158,6 @@ protected:
 
         m_busy->setVisible(m_model && m_model->searchBusy());
         m_busy->setGeometry({geometry().width - kLargeSpacing - 16, centeredStart(height, 16), 16, 16});
-        (void)scopeHeight;
     }
 
     ui::RectF place(ui::Label* label, double x, bool selected, double maximum = 0)
@@ -160,19 +165,22 @@ protected:
         const ui::Theme& theme = ui::Theme::current();
         const double height = geometry().height;
         const ui::SizeF hint = label->sizeHint();
-        double width = std::ceil(hint.width + kLargeSpacing * 2);
+        constexpr double inset = 9;
+        constexpr double scopeHeight = 18;
+        double width = std::ceil(hint.width + inset * 2);
         if (maximum > 0)
             width = std::min(width, maximum);
-        label->setColor(selected ? theme.highlight : theme.text);
-        const double textWidth = std::min(hint.width, width - kLargeSpacing * 2);
-        const ui::RectF rect {x, centeredStart(height, 24), width, 24};
-        label->setGeometry({rect.x + centeredStart(width, textWidth), rect.y + centeredStart(24, hint.height),
+        label->setColor(selected ? theme.text : theme.disabledText);
+        const double textWidth = std::min(hint.width, width - inset * 2);
+        const ui::RectF rect {x, centeredStart(height, scopeHeight), width, scopeHeight};
+        label->setGeometry({rect.x + centeredStart(width, textWidth), rect.y + centeredStart(scopeHeight, hint.height),
                             textWidth, hint.height});
         return rect;
     }
 
     void paint(ui::Painter& painter) override
     {
+        painter.drawHorizontalLine(0, geometry().height - 1, geometry().width, style::textAlpha(.08));
         const auto plate = [&](const ui::RectF& rect, bool selected, int index) {
             ui::Color fill {0, 0, 0, 0};
             if (selected)
@@ -182,7 +190,7 @@ protected:
             else if (m_hovered == index)
                 fill = style::textAlpha(0.05);
             if (fill.a)
-                painter.drawSmoothRectangle(rect, rect.height / 2, fill);
+                painter.drawSmoothRectangle(rect, 4, fill);
         };
         plate(m_homeRect, folderIsHome() || (m_model && m_model->searchHome()), 0);
         if (m_folder->isVisible())
@@ -310,6 +318,15 @@ public:
         navigationCaption->setTextAlignment(ui::Label::TextAlignment::Center);
         navigationCaption->setVerticallyCentered(true);
         pathBar = addChild<PathBar>();
+        pathBar->onEditorVisibilityChanged = [this] { requestLayout(); };
+        searchTitle = addChild<ui::Label>();
+        searchTitle->setName("searchTitle");
+        searchTitle->setFontSize(14);
+        searchTitle->setWeight(600);
+        searchTitle->setVerticallyCentered(true);
+        searchTitle->setElide(ui::Label::Elide::Middle);
+        searchTitle->setVisible(false);
+        searchTitle->setMovesWindow(true);
         toolbar = addChild<ui::Toolbar>();
         toolbar->setDefaults(Preferences::defaultToolbar());
         setupItems();
@@ -318,7 +335,7 @@ public:
     void setupItems()
     {
         navigationCaption->setText(tr("Back/Forward"));
-        items = {{"views", tr("View"), "view-icons", 134, [this](ui::Toolbar& owner) -> ui::View* {
+        items = {{"views", tr("View"), "view-icons", 154, [this](ui::Toolbar& owner) -> ui::View* {
             auto* control = owner.addChild<ui::SegmentedControl>(viewNames());
             control->setName("viewModeControl");
             control->setToolbarAppearance(true);
@@ -331,10 +348,10 @@ public:
             control->onCurrentChanged = [this](int index) { if (onViewChanged) onViewChanged(kViews.at(size_t(index))); };
             control->setCurrentIndex(viewIndex(mode));
             return control;
-        }, {"view-icons", "view-list", "view-columns", "view-gallery"}}, {"group", tr("Group"), "view-group", 43, {}, {}, true},
-                   {"share", tr("Share"), "share", 33, {}, {}, false, "actions"},
-                   {"tags", tr("Add Tags"), "tag", 33, {}, {}, false, "actions"},
-                   {"action", tr("Action"), "ellipsis", 33, {}, {}, false, "actions"}, {"search", tr("Search"), "search", 34},
+        }, {"view-icons", "view-list", "view-columns", "view-gallery"}}, {"group", tr("Group"), "view-group", 46, {}, {}, true},
+                   {"share", tr("Share"), "share", 36, {}, {}, false, "actions"},
+                   {"tags", tr("Add Tags"), "tag", 36, {}, {}, false, "actions"},
+                   {"action", tr("Action"), "ellipsis", 36, {}, {}, false, "actions"}, {"search", tr("Search"), "search", 36},
                   {"info", tr("Get Info"), "info"}, {"quicklook", tr("Quick Look"), "view-quick-look"},
                  {"preview", tr("Preview"), "sidebar"}, {"newfolder", tr("New Folder"), "folder"}};
         toolbar->setItems(items);
@@ -345,7 +362,7 @@ public:
     {
         auto& prefs = Preferences::instance();
         toolbar->setDisplay(static_cast<ui::Toolbar::Display>(prefs.toolbarDisplay()));
-        toolbar->setOrder(prefs.toolbarOrder());
+        setToolbarOrder(searchExpanded());
         toolbar->setPreviewSelection("views", viewIndex(mode));
         for (const auto& child : toolbar->children())
             if (auto* control = dynamic_cast<ui::SegmentedControl*>(child.get()))
@@ -357,11 +374,27 @@ public:
     ui::HeaderButton* forward;
     ui::Label* navigationCaption;
     PathBar* pathBar;
+    ui::Label* searchTitle;
     ui::Toolbar* toolbar;
     std::vector<ui::Toolbar::Item> items;
     std::function<void(int)> onViewChanged;
     int mode = Preferences::Grid;
     double sidebarWidth = SideBar::kDefaultWidth;
+    bool customizing = false;
+
+private:
+    bool searchExpanded() const
+    {
+        return !customizing && pathBar->editorVisible() && geometry().width - sidebarWidth >= 625;
+    }
+
+    void setToolbarOrder(bool expanded)
+    {
+        auto order = Preferences::instance().toolbarOrder();
+        if (expanded)
+            std::erase(order, "search");
+        toolbar->setOrder(order);
+    }
 
 protected:
     void layout() override
@@ -369,23 +402,33 @@ protected:
         double x = sidebarWidth + kNavigationStart;
         const double right = geometry().width;
         // The plate is centred on the window controls' line.
+        const bool expanded = searchExpanded();
+        setToolbarOrder(expanded);
         const auto hint = toolbar->sizeHint();
         const bool labels = toolbar->display() == ui::Toolbar::Display::IconsAndText;
-        const double toolbarY = (geometry().height - hint.height) / 2;
-        const ui::SizeF plate = navigation->sizeHint();
+        // Align the glyphs and title to the centreline of the navigation
+        // plate. Labelled toolbars also need room underneath the buttons.
+        const double toolbarY = (geometry().height - hint.height) / 2 + (labels ? 0 : 3);
+        const ui::SizeF plate = labels ? navigation->sizeHint() : kNavigationPlate;
         const double navigationY = toolbarY + (std::min(hint.height, 30.0) - plate.height) / 2;
         navigation->setGeometry({x, navigationY, plate.width, plate.height});
         navigationCaption->setVisible(labels);
         navigationCaption->setGeometry({x - 8, navigationY + plate.height, plate.width + 16, 10});
         x += plate.width + kNavigationTitleGap;
-        const double end = right - kHeaderEndMargin;
-        const auto& order = toolbar->order();
-        const bool flexible = std::find(order.begin(), order.end(), ui::Toolbar::FlexibleSpace) != order.end();
+        const double rightEdge = right - kHeaderEndMargin;
+        const double searchWidth = std::clamp(rightEdge - x - hint.width - 145, 145.0, 244.0);
+        const double end = expanded ? rightEdge - searchWidth - 9 : rightEdge;
+        const auto& visibleOrder = toolbar->order();
+        const bool flexible = std::find(visibleOrder.begin(), visibleOrder.end(), ui::Toolbar::FlexibleSpace) != visibleOrder.end();
         const double width = flexible ? std::max(hint.width, end - x - 140) : hint.width;
         const double toolbarX = std::max(x + 48, end - width);
         toolbar->setGeometry({toolbarX, toolbarY, std::max(0.0, end - toolbarX), hint.height});
-        pathBar->setGeometry({x, navigationY + (plate.height - kButtonSize) / 2,
-                              std::max(0.0, toolbarX - x - kSmallSpacing), kButtonSize});
+        const double y = navigationY + (plate.height - kButtonSize) / 2;
+        const ui::RectF titleRect{x, y, std::max(0.0, toolbarX - x - kSmallSpacing), kButtonSize};
+        searchTitle->setVisible(expanded);
+        searchTitle->setGeometry(titleRect);
+        pathBar->setSearchCapsule(expanded);
+        pathBar->setGeometry(expanded ? ui::RectF{rightEdge - searchWidth, y, searchWidth, kButtonSize} : titleRect);
     }
 };
 
@@ -465,6 +508,7 @@ public:
         scopeBar = addChild<SearchScopeBar>();
         trashBar = addChild<TrashBar>();
         header = addChild<ui::WindowHeader>(FolderWindow::kHeaderInset);
+        header->setButtonMargin(9);
         row = header->setContent<HeaderRow>();
         header->setContentUnderButtons(true);
         divider = addChild<ui::SidebarDivider>(SideBar::kMinimumWidth, SideBar::kMaximumWidth,
@@ -500,7 +544,7 @@ public:
 
     double barsHeight() const
     {
-        return FolderWindow::kHeaderInset + (tabsShown ? FolderWindow::kTabBarHeight : 0) + (scopeShown ? kBarHeight : 0)
+        return FolderWindow::kHeaderInset + (tabsShown ? FolderWindow::kTabBarHeight : 0) + (scopeShown ? kScopeBarHeight : 0)
                 + (trashShown ? kBarHeight : 0);
     }
 
@@ -515,6 +559,7 @@ protected:
         const double left = std::min(sidebarWidth, widest);
         sidebar->setGeometry({0, 0, left, height});
         row->sidebarWidth = left;
+        row->customizing = palette != nullptr;
         row->requestLayout();
         divider->setSidebarWidth(left);
         divider->setGeometry({left - ui::SidebarDivider::kWidth / 2, 0, ui::SidebarDivider::kWidth, height});
@@ -533,8 +578,8 @@ protected:
                              kNewTabButtonSize});
         y += tabBarHeight;
         scopeBar->setVisible(scopeShown);
-        scopeBar->setGeometry({left, y, content.width, scopeShown ? kBarHeight : 0});
-        y += scopeShown ? kBarHeight : 0;
+        scopeBar->setGeometry({left, y, content.width, scopeShown ? kScopeBarHeight : 0});
+        y += scopeShown ? kScopeBarHeight : 0;
         trashBar->setVisible(trashShown);
         trashBar->setGeometry({left, y, content.width, trashShown ? kBarHeight : 0});
 
@@ -619,7 +664,7 @@ FolderWindow::FolderWindow(FileManagerHost* host, const FolderPage::Start& start
     if (size.width > 0 && size.height > 0) {
         m_window->resize(size);
     } else {
-        m_window->resize({828, 500});
+        m_window->resize({894, 572});
         m_window->setRestoresSize("main");
     }
 
@@ -1064,6 +1109,8 @@ void FolderWindow::updateHeader()
     FolderModel& model = page->model();
     m_window->setTitle(page->folderName());
     m_pathBar->setFolderTitle(page->folderName());
+    m_root->row->searchTitle->setText(model.searchText().empty() ? page->folderName()
+        : format(tr("Searching “{text}”"), {{"text", model.searchHome() ? tr("Home") : page->folderName()}}));
     if (m_viewOptions && m_viewOptions->isShown())
         m_viewOptions->sync(page);
     m_root->row->mode = page->viewMethod();
@@ -1089,8 +1136,8 @@ void FolderWindow::updateHeader()
 void FolderWindow::updateBackground()
 {
     const bool active = m_window->isActive();
-    m_window->setBackgroundColor(active ? ui::ColorId::TranslucentWindowBackground
-                                        : ui::ColorId::TranslucentWindowBackgroundInactive);
+    m_window->setBackgroundColor(ui::Theme::appearanceStyle().reduceTransparency ? ui::ColorId::Background
+                : active ? ui::ColorId::TranslucentWindowBackground : ui::ColorId::TranslucentWindowBackgroundInactive);
     updateBlur();
     // Views colour their text by it as they lay out.
     m_window->requestLayout();
@@ -1098,8 +1145,7 @@ void FolderWindow::updateBackground()
 
 void FolderWindow::updateBlur()
 {
-    const ui::SizeF size = m_window->size();
-    m_window->setBackgroundBlur({0, 0, size.width, size.height}, ui::Theme::current().windowRadius);
+    ui::toolbar_surface::applyWindowGlass(*m_window);
 }
 
 void FolderWindow::showContextMenu(ui::PointF position)

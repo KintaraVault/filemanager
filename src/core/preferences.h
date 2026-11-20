@@ -150,8 +150,8 @@ private:
     double m_listTypeColumnWidth = 150;
     int m_maximumIconSize = 256;
     int m_minimumIconSize = 64;
-    double m_gridIconSize = 64;
-    double m_sidebarWidth = 190;
+    double m_gridIconSize = 128;
+    double m_sidebarWidth = 152;
     bool m_showHiddenFiles = false;
     mutable std::map<std::string, std::optional<ViewOptions>> m_viewOptions;
     mutable std::map<std::string, std::pair<int, bool>> m_pinnedViews;

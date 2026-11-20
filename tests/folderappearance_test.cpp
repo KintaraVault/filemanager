@@ -3,6 +3,7 @@
 #include "core/folderappearance.h"
 #include "dialogs/folderappearancedialog.h"
 #include "testutil.h"
+#include "views/foldericon.h"
 
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -63,4 +64,42 @@ TEST(FolderAppearanceTest, DialogRendersAndCloses)
     EXPECT_FALSE(dialog->window()->grab().isNull());
     dialog->onCloseRequested();
     EXPECT_FALSE(dialog->isShown());
+}
+
+TEST(FolderAppearanceTest, ExplicitColorWinsOverGlobalFolderAndIconTint)
+{
+    namespace ui = cutefish::ui;
+    struct Restore {
+        ui::Theme theme = ui::Theme::current();
+        ui::AppearanceStyle style = ui::Theme::appearanceStyle();
+        ~Restore() { ui::Theme::setCurrent(theme, style); }
+    } restore;
+    fmtest::TemporaryDir dir;
+    const auto path = dir.filePath("Project");
+    ASSERT_TRUE(std::filesystem::create_directory(path));
+    fm::FolderThemeIcon icon("folder");
+    icon.setFolderPath(path);
+    icon.setGeometry({0, 0, 128, 128});
+    auto style = restore.style;
+    style.icons = ui::IconStyle::Default;
+    style.folderColor = 7;
+    ui::Theme::setCurrent(restore.theme, style);
+    const auto pixel = [&] { return icon.grab(1).pixel(64, 86); };
+    const uint32_t green = pixel();
+    EXPECT_GT((green >> 8) & 255, (green >> 16) & 255);
+
+    style.icons = ui::IconStyle::Tinted;
+    style.tone = ui::IconTone::Light;
+    style.tintColor = 2;
+    ui::Theme::setCurrent(restore.theme, style);
+    const uint32_t purple = pixel();
+    EXPECT_GT(purple & 255, (purple >> 8) & 255);
+    EXPECT_NE(purple, green);
+
+    appearance::Editor edit(path);
+    ASSERT_TRUE(edit.setColor(0xdc2522));
+    icon.setAppearance(edit.appearance());
+    const uint32_t red = pixel();
+    EXPECT_GT((red >> 16) & 255, red & 255);
+    EXPECT_NE(red, purple);
 }

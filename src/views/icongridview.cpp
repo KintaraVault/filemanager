@@ -274,7 +274,7 @@ void IconItem::layoutIcon(const ui::RectF& iconItem, double emblemSize)
     layoutThumbnail();
     const bool thumbnailShown = m_thumbnail->isVisible();
     m_icon->setVisible(!thumbnailShown);
-    m_overlay->setVisible(m_selected && !thumbnailShown && !m_icon->customized());
+    m_overlay->setVisible(m_selected && !thumbnailShown && !m_icon->paintsFace());
 
     const ui::RectF anchor = thumbnailShown ? m_thumbnail->geometry() : iconRect;
     m_emblem->setSize(emblemSize);
